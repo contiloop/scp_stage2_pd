@@ -1,4 +1,4 @@
-# scp_stage1
+# scp_stage1_cpt
 
 Independent CPT pipeline using Hydra + Unsloth + W&B.
 
@@ -7,19 +7,62 @@ Independent CPT pipeline using Hydra + Unsloth + W&B.
 - `configs/*`: data/model/finetune/training/logging configs
 - `src/preprocess.py`: preprocessing entrypoint
 - `src/train.py`: training entrypoint
+- `src/evaluate.py`: perplexity + benchmark evaluation entrypoint
 - `Makefile`: independent run targets
 
-## Quick Start
+## Vast.ai / RunPod (Recommended)
 
 ```bash
-cd scp_stage1
+# Docker image: unsloth/unsloth:latest
+
+git clone https://github.com/contiloop/scp_stage1_cpt.git
+cd scp_stage1_cpt
+make setup
+python -c "from huggingface_hub import login; login(token='hf_xxxxxxx')"
+wandb login                # optional
+make preprocess
+
+# keep training alive after SSH disconnect
+tmux new -s train
+make train config=full
+```
+
+## Quick Start (Local)
+
+```bash
+cd scp_stage1_cpt
 make setup
 make preprocess
-make train
+make train config=full
 make eval
-make eval-benchmarks
-make eval-benchmarks-base
 ```
+
+## What Each Make Target Does
+
+- `make preprocess`: downloads/loads raw dataset and writes processed train/val dataset
+- `make train`: runs CPT training from config (`config=...` selects config file)
+- `make train-resume`: resumes from latest checkpoint (`training.resume_from_checkpoint=auto`)
+- `make eval`: runs validation PPL for base + CPT model, then lm-eval on CPT model
+- `make eval-benchmarks`: benchmark-only, CPT model only
+- `make eval-benchmarks-base`: benchmark-only, base model only
+- `make eval-benchmarks-both`: benchmark-only, base + CPT
+
+`limit` controls benchmark sample count (faster smoke tests). Default is `400`:
+
+```bash
+make eval-benchmarks limit=400
+make eval-benchmarks-base limit=400
+make eval-benchmarks-both limit=400
+```
+
+`make eval` batch size is controlled separately from training:
+
+```yaml
+# configs/evaluation/default.yaml
+batch_size: 4
+```
+
+Train-time eval batch still uses `training.per_device_eval_batch_size`.
 
 ## Key Defaults
 
@@ -31,7 +74,7 @@ make eval-benchmarks-base
 - Preprocessing packing: `preprocessing.packing.enabled=false` (store unpacked records)
 - Checkpoint policy: `save_strategy=steps`, `save_steps=500`, `save_total_limit=3`
 
-## Useful Configs
+## Config Usage
 
 ```bash
 # default (configs/config.yaml)
@@ -40,23 +83,26 @@ make train
 # full-weight (configs/full.yaml)
 make train config=full
 
+# GPU memory presets (full-weight)
+make train config=full_48gb
+make train config=full_80gb
+make train config=full_96gb
+
+# LoRA (configs/lora.yaml)
+make train config=lora
+
 # resume from last checkpoint
 make train-resume config=full
-
-# run benchmarks only (lm-eval)
-make eval-benchmarks
-
-# run base-only benchmarks
-make eval-benchmarks-base
-
-# reduce benchmark size for quick checks
-make eval-benchmarks limit=100
-
-# run base + cpt benchmarks together
-make eval-benchmarks-both
-
-# evaluate all checkpoints in output_dir
-make eval-all
 ```
 
-Create a new file under `configs/` when you need a new experiment setup, then run `make train config=<file_name_without_yaml>`.
+GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):
+
+- `full_48gb`: train batch `2`, grad accum `16`, train-eval batch `2`, offline eval batch `4`
+- `full_80gb`: train batch `4`, grad accum `8`, train-eval batch `4`, offline eval batch `8`
+- `full_96gb`: train batch `8`, grad accum `4`, train-eval batch `8`, offline eval batch `12`
+
+Create a new file under `configs/` when you need a new experiment setup, then run:
+
+```bash
+make train config=<file_name_without_yaml>
+```

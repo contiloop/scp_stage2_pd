@@ -1,18 +1,18 @@
 defaults:
   - data: korean_financial_cpt
   - model: gemma3_4b
-  - finetune: lora
+  - finetune: full
   - preprocessing: default
-  - training: default
-  - evaluation: default
+  - training: gpu48
+  - evaluation: gpu48
   - logging: wandb
   - _self_
 
 seed: 42
 
 experiment:
-  name: "korean-financial-cpt-lora"
-  output_root: "artifacts/cpt_lora"
+  name: "korean-financial-cpt-full-48gb"
+  output_root: "artifacts/cpt_full_48gb"
   processed_dir: "data/processed/cpt_korean_financial"
 
 hydra:
@@ -21,3 +21,4 @@ hydra:
   sweep:
     dir: ${experiment.output_root}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
+

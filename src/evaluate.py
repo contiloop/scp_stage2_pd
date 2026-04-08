@@ -204,7 +204,29 @@ def load_model_for_eval(model_path: Path, base_model: str, max_seq_length: int):
     return model, tokenizer, mode
 
 
-def evaluate_single(model_path: Path, val_ds, args, cfg, eval_out_dir: Path) -> dict[str, Any]:
+def compute_base_ppl(val_ds, args, cfg) -> dict[str, Any]:
+    base_model = args.base_model or str(cfg.model.pretrained_model_name_or_path)
+    max_seq_length = int(cfg.model.max_seq_length)
+
+    print("=" * 80)
+    print(f"Evaluating Base PPL: {base_model}")
+    print("=" * 80)
+
+    model, _tokenizer, mode = _load_with_unsloth(
+        base_model,
+        max_seq_length=max_seq_length,
+        model_hint=base_model,
+    )
+    print(f"loader(base): {mode}")
+    ppl_metrics = compute_ppl(model, val_ds, batch_size=args.batch_size, max_batches=args.max_batches)
+    print(f"base ppl: {ppl_metrics['ppl']:.4f} | loss: {ppl_metrics['loss']:.6f}")
+
+    del model
+    free_vram()
+    return ppl_metrics
+
+
+def evaluate_single(model_path: Path, val_ds, args, cfg, eval_out_dir: Path, base_ppl_metrics: dict[str, Any] | None = None) -> dict[str, Any]:
     base_model = args.base_model or str(cfg.model.pretrained_model_name_or_path)
     max_seq_length = int(cfg.model.max_seq_length)
 
@@ -226,6 +248,7 @@ def evaluate_single(model_path: Path, val_ds, args, cfg, eval_out_dir: Path) -> 
     results = {
         "model_path": str(model_path),
         "ppl": ppl_metrics,
+        "base_ppl": base_ppl_metrics,
         "benchmarks": {},
     }
 
@@ -273,6 +296,7 @@ def evaluate_single(model_path: Path, val_ds, args, cfg, eval_out_dir: Path) -> 
     return {
         "label": label,
         "ppl": None if ppl_metrics is None else ppl_metrics["ppl"],
+        "base_ppl": None if base_ppl_metrics is None else base_ppl_metrics["ppl"],
         "path": str(model_path),
     }
 
@@ -316,7 +340,7 @@ def main():
     parser.add_argument("--model_path", nargs="+", default=None, help="Checkpoint/model path(s)")
     parser.add_argument("--all_checkpoints", action="store_true")
     parser.add_argument("--base_model", default=None)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--max_batches", type=int, default=None)
     parser.add_argument("--skip_benchmarks", action="store_true")
     parser.add_argument("--benchmarks_only", action="store_true")
@@ -329,6 +353,16 @@ def main():
     args = parser.parse_args()
 
     cfg = compose_cfg(args.config_path, args.config_name)
+
+    if args.batch_size is None:
+        if "evaluation" in cfg and "batch_size" in cfg.evaluation:
+            args.batch_size = int(cfg.evaluation.batch_size)
+        else:
+            args.batch_size = int(cfg.training.per_device_eval_batch_size)
+    else:
+        args.batch_size = int(args.batch_size)
+
+    print(f"eval batch_size: {args.batch_size}")
     model_paths = resolve_model_paths(args, cfg)
 
     if not model_paths:
@@ -345,6 +379,7 @@ def main():
         return
 
     val_ds = None
+    base_ppl_metrics = None
     if not args.benchmarks_only:
         dataset_dir = resolve_workspace_path(cfg.training.dataset_dir)
         val_path = dataset_dir / "val"
@@ -352,6 +387,11 @@ def main():
             raise FileNotFoundError(f"Validation dataset not found: {val_path}")
         val_ds = load_from_disk(str(val_path))
         print(f"validation rows: {len(val_ds)}")
+        try:
+            base_ppl_metrics = compute_base_ppl(val_ds, args, cfg)
+        except Exception as exc:
+            print(f"[WARN] failed to compute base ppl: {exc}")
+            free_vram()
 
     summaries = []
     for model_path in model_paths:
@@ -360,7 +400,14 @@ def main():
             print(f"[WARN] skip missing model path: {model_path}")
             continue
         try:
-            summary = evaluate_single(model_path, val_ds, args, cfg, eval_out_dir=eval_out_dir)
+            summary = evaluate_single(
+                model_path,
+                val_ds,
+                args,
+                cfg,
+                eval_out_dir=eval_out_dir,
+                base_ppl_metrics=base_ppl_metrics,
+            )
             summaries.append(summary)
         except Exception as exc:
             print(f"[ERROR] failed on {model_path.name}: {exc}")
@@ -372,6 +419,8 @@ def main():
         print("=" * 80)
         print("PPL Summary")
         print("=" * 80)
+        if base_ppl_metrics is not None:
+            print(f"{'base':<20} ppl={base_ppl_metrics['ppl']:.4f}")
         for item in summaries:
             if item["ppl"] is None:
                 print(f"{item['label']:<20} ppl=skip  path={item['path']}")

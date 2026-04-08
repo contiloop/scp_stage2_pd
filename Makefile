@@ -1,4 +1,4 @@
-.PHONY: setup set preprocess train train-resume eval eval-all eval-benchmarks eval-benchmarks-base eval-benchmarks-both show-config
+.PHONY: setup set preprocess train train-resume eval eval-benchmarks eval-benchmarks-base eval-benchmarks-both show-config
 
 PYTHON ?= python3
 config ?= config
@@ -28,9 +28,6 @@ train-resume:
 
 eval:
 	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --limit $(limit)
-
-eval-all:
-	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --all_checkpoints --limit $(limit)
 
 eval-benchmarks:
 	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target cpt --limit $(limit)

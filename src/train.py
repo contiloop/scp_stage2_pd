@@ -297,7 +297,9 @@ def main(cfg: DictConfig) -> None:
     else:
         _set_if_supported(sft_kwargs, sft_fields, "dataset_text_field", "")
         _set_if_supported(sft_kwargs, sft_fields, "packing", False)
-        _set_if_supported(sft_kwargs, sft_fields, "prediction_loss_only", True)
+
+    # Keep eval memory usage low by disabling prediction/logit accumulation.
+    _set_if_supported(sft_kwargs, sft_fields, "prediction_loss_only", True)
 
     args = SFTConfig(**sft_kwargs)
 
