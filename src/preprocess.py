@@ -19,7 +19,7 @@ from typing import Any
 import hydra
 from datasets import Dataset, IterableDataset, load_dataset
 from datasets.exceptions import DatasetGenerationCastError
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 from transformers import AutoTokenizer
 from trl import pack_dataset
 
@@ -341,8 +341,24 @@ def main(cfg: DictConfig) -> None:
         raise RuntimeError(f"Tokenizer '{tokenizer_name}' has no eos token id")
 
     unpacked_records, stats = build_unpacked_records(cfg, tokenizer=tokenizer)
+    if not unpacked_records and bool(cfg.data.dataset.get("prefer_local_snapshot", True)):
+        print(
+            "[WARN] No records built from local snapshot path. "
+            "Retrying with HF Hub streaming."
+        )
+        with open_dict(cfg):
+            cfg.data.dataset.prefer_local_snapshot = False
+            cfg.data.dataset.streaming = True
+        unpacked_records, stats = build_unpacked_records(cfg, tokenizer=tokenizer)
+
     if not unpacked_records:
-        raise RuntimeError("No records built from dataset. Check data.text_fields and filtering settings.")
+        raise RuntimeError(
+            "No records built from dataset. "
+            f"docs_kept={stats.get('docs_kept', 0)}, "
+            f"rows_skipped_empty={stats.get('rows_skipped_empty', 0)}, "
+            f"rows_skipped_short={stats.get('rows_skipped_short', 0)}. "
+            "Check data.text_fields and filtering settings."
+        )
 
     unpacked_ds = Dataset.from_list(unpacked_records)
     final_ds = maybe_pack_dataset(unpacked_ds, cfg)
