@@ -18,6 +18,7 @@ from typing import Any
 
 import hydra
 from datasets import Dataset, IterableDataset, load_dataset
+from datasets.exceptions import DatasetGenerationCastError
 from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer
 from trl import pack_dataset
@@ -94,13 +95,32 @@ def chunk_boundary_first(
 
 
 def iter_dataset_rows(dataset_cfg: DictConfig):
-    dataset = load_dataset(
-        path=dataset_cfg.path,
-        name=dataset_cfg.name,
-        split=dataset_cfg.split,
-        streaming=bool(dataset_cfg.streaming),
-        trust_remote_code=bool(dataset_cfg.trust_remote_code),
-    )
+    load_kwargs = {
+        "path": dataset_cfg.path,
+        "name": dataset_cfg.name,
+        "split": dataset_cfg.split,
+        "streaming": bool(dataset_cfg.streaming),
+        "trust_remote_code": bool(dataset_cfg.trust_remote_code),
+    }
+
+    try:
+        dataset = load_dataset(**load_kwargs)
+    except DatasetGenerationCastError:
+        if bool(dataset_cfg.streaming):
+            raise
+        # Some JSONL datasets on HF include mixed schemas across files.
+        # Fallback to streaming mode, which avoids strict Arrow schema casting.
+        print(
+            "[WARN] Dataset schema cast failed with non-streaming load. "
+            "Retrying with streaming=True."
+        )
+        dataset = load_dataset(
+            path=dataset_cfg.path,
+            name=dataset_cfg.name,
+            split=dataset_cfg.split,
+            streaming=True,
+            trust_remote_code=bool(dataset_cfg.trust_remote_code),
+        )
 
     max_rows = dataset_cfg.get("max_rows")
     if max_rows is not None:
