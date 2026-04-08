@@ -2,7 +2,8 @@ dataset:
   path: "alwaysgood/korean-financial-cpt"
   name: null
   split: "train"
-  streaming: true
+  streaming: false
+  prefer_local_snapshot: true
   trust_remote_code: false
   max_rows: null
 

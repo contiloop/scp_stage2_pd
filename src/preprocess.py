@@ -26,6 +26,60 @@ from trl import pack_dataset
 from .common import resolve_workspace_path
 
 
+def resolve_local_dataset_snapshot(repo_id: str) -> Path | None:
+    """
+    Return latest local HF dataset snapshot path if available.
+    """
+    repo_cache = repo_id.replace("/", "--")
+    snapshots_dir = (
+        Path.home()
+        / ".cache"
+        / "huggingface"
+        / "hub"
+        / f"datasets--{repo_cache}"
+        / "snapshots"
+    )
+    if not snapshots_dir.exists():
+        return None
+
+    snapshots = [p for p in snapshots_dir.iterdir() if p.is_dir()]
+    if not snapshots:
+        return None
+    return max(snapshots, key=lambda p: p.stat().st_mtime)
+
+
+def iter_rows_from_local_snapshot(dataset_cfg: DictConfig):
+    """
+    Iterate rows from local snapshot JSONL files first (mono-like fast path).
+    Returns None if local snapshot is unavailable or unusable.
+    """
+    repo_id = str(dataset_cfg.path)
+    snapshot = resolve_local_dataset_snapshot(repo_id)
+    if snapshot is None:
+        return None
+
+    jsonl_files = sorted(snapshot.rglob("*.jsonl"))
+    if not jsonl_files:
+        return None
+
+    max_rows = dataset_cfg.get("max_rows")
+    max_rows = int(max_rows) if max_rows is not None else None
+    emitted = 0
+
+    print(
+        f"[INFO] Loading dataset from local snapshot: {snapshot} "
+        f"({len(jsonl_files)} jsonl files)"
+    )
+
+    for data_file in jsonl_files:
+        ds = load_dataset("json", data_files=str(data_file), split="train")
+        for row in ds:
+            if max_rows is not None and emitted >= max_rows:
+                return
+            yield emitted, row
+            emitted += 1
+
+
 def normalize_text(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
@@ -95,6 +149,12 @@ def chunk_boundary_first(
 
 
 def iter_dataset_rows(dataset_cfg: DictConfig):
+    if bool(dataset_cfg.get("prefer_local_snapshot", True)):
+        local_iter = iter_rows_from_local_snapshot(dataset_cfg)
+        if local_iter is not None:
+            yield from local_iter
+            return
+
     load_kwargs = {
         "path": dataset_cfg.path,
         "name": dataset_cfg.name,
