@@ -88,6 +88,11 @@ make train config=full_48gb
 make train config=full_80gb
 make train config=full_96gb
 
+# GPU-specific training-time eval OOM probe presets
+make train config=full_eval_oom_probe_48gb
+make train config=full_eval_oom_probe_80gb
+make train config=full_eval_oom_probe_96gb
+
 # LoRA (configs/lora.yaml)
 make train config=lora
 
@@ -100,6 +105,9 @@ GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):
 - `full_48gb`: train batch `2`, grad accum `16`, train-eval batch `2`, offline eval batch `4`
 - `full_80gb`: train batch `4`, grad accum `8`, train-eval batch `4`, offline eval batch `8`
 - `full_96gb`: train batch `8`, grad accum `4`, train-eval batch `8`, offline eval batch `12`
+- `full_eval_oom_probe_48gb`: `gpu48` + `training.{max_steps=100, eval_steps=1, save_steps=10}`
+- `full_eval_oom_probe_80gb`: `gpu80` + `training.{max_steps=100, eval_steps=1, save_steps=10}`
+- `full_eval_oom_probe_96gb`: `gpu96` + `training.{max_steps=100, eval_steps=1, save_steps=10}`
 
 Create a new file under `configs/` when you need a new experiment setup, then run:
 
