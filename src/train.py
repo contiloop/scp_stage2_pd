@@ -53,8 +53,16 @@ class CausalPackedCollator:
 
 
 def is_vision_model(model_name: str) -> bool:
-    vision_keywords = ["qwen3.5", "qwen3_5", "gemma-3", "gemma3"]
-    return any(keyword in model_name.lower() for keyword in vision_keywords)
+    name = model_name.lower()
+    # Qwen3.5 Base/Instruct should run on language backend for text CPT.
+    if "qwen3.5" in name or "qwen3_5" in name:
+        return any(tag in name for tag in ("-vl", "_vl", "vision"))
+
+    # Gemma 3 models in Unsloth are multimodal checkpoints.
+    if "gemma-3" in name or "gemma3" in name:
+        return True
+
+    return any(tag in name for tag in ("-vl", "_vl", "vision"))
 
 
 def count_params(model) -> tuple[int, int]:
