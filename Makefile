@@ -3,6 +3,7 @@
 PYTHON ?= python3
 config ?= config
 limit ?= 400
+ovr ?=
 
 setup:
 	$(PYTHON) -m pip install -e . --no-deps -q
@@ -18,13 +19,13 @@ setup:
 set: setup
 
 preprocess:
-	$(PYTHON) -m src.preprocess --config-path ../configs --config-name $(config)
+	$(PYTHON) -m src.preprocess --config-path ../configs --config-name $(config) $(ovr)
 
 train:
-	$(PYTHON) -m src.train --config-path ../configs --config-name $(config)
+	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr)
 
 train-resume:
-	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) training.resume_from_checkpoint=auto
+	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) training.resume_from_checkpoint=auto $(ovr)
 
 eval:
 	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --limit $(limit)
@@ -39,4 +40,4 @@ eval-benchmarks-both:
 	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target both --limit $(limit)
 
 show-config:
-	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) --cfg job
+	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr) --cfg job
