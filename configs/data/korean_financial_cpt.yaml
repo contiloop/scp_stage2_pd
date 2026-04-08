@@ -1,0 +1,18 @@
+dataset:
+  path: "alwaysgood/korean-financial-cpt"
+  name: null
+  split: "train"
+  streaming: false
+  trust_remote_code: false
+  max_rows: null
+
+text_fields:
+  - "content"
+  - "contents"
+  - "text"
+  - "document"
+  - "body"
+
+id_column: null
+source_column: null
+

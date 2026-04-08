@@ -1,0 +1,13 @@
+report_to:
+  - "wandb"
+
+run_name: ${experiment.name}-${finetune.method}
+
+wandb:
+  project: "mono-cpt"
+  entity: null
+  tags:
+    - "cpt"
+    - "korean-financial"
+  notes: ""
+
