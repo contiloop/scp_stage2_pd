@@ -24,7 +24,7 @@ from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from .common import resolve_workspace_path
+from .common import resolve_workspace_path, suppress_noisy_library_logs
 
 BENCHMARK_TASKS = "mmlu,hellaswag,arc_easy,arc_challenge,winogrande"
 KOREAN_BENCHMARK_TASKS = "kmmlu,kobest_boolq,kobest_copa,kobest_hellaswag"
@@ -334,6 +334,8 @@ def evaluate_base_only(args, cfg, eval_out_dir: Path) -> None:
 
 
 def main():
+    suppress_noisy_library_logs()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-path", default="configs")
     parser.add_argument("--config-name", default="config")

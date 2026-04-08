@@ -46,6 +46,7 @@ make eval
 - `make eval-benchmarks`: benchmark-only, CPT model only
 - `make eval-benchmarks-base`: benchmark-only, base model only
 - `make eval-benchmarks-both`: benchmark-only, base + CPT
+- `make push-to-hub`: upload final model or specific checkpoint to Hugging Face Hub
 
 `limit` controls benchmark sample count (faster smoke tests). Default is `400`:
 
@@ -98,6 +99,15 @@ make train config=lora
 
 # resume from last checkpoint
 make train-resume config=full
+
+# upload final output dir (default CKPT=final)
+make push-to-hub config=full_96gb HF_REPO=your-name/your-model
+
+# upload latest checkpoint folder
+make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=latest
+
+# upload specific checkpoint
+make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=checkpoint-1500
 ```
 
 GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):

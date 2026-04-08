@@ -1,9 +1,12 @@
-.PHONY: setup set preprocess train train-resume eval eval-benchmarks eval-benchmarks-base eval-benchmarks-both show-config
+.PHONY: setup set preprocess train train-resume eval eval-benchmarks eval-benchmarks-base eval-benchmarks-both show-config push-to-hub
 
 PYTHON ?= python3
 config ?= config
 limit ?= 400
 ovr ?=
+HF_REPO ?=
+CKPT ?= final
+HF_PRIVATE ?= false
 
 setup:
 	$(PYTHON) -m pip install -e . --no-deps -q
@@ -41,3 +44,7 @@ eval-benchmarks-both:
 
 show-config:
 	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr) --cfg job
+
+push-to-hub:
+	@if [ -z "$(HF_REPO)" ]; then echo "HF_REPO is required. Example: make push-to-hub HF_REPO=your-name/your-model"; exit 1; fi
+	$(PYTHON) -m src.push_to_hub --config-path ../configs --config-name $(config) --repo $(HF_REPO) --checkpoint $(CKPT) $(if $(filter true,$(HF_PRIVATE)),--private,)

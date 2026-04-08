@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +48,11 @@ def resolve_torch_dtype(name: str | None):
     return mapping[key]
 
 
-def setup_wandb_env(logging_cfg: DictConfig, experiment_name: str | None = None) -> None:
+def setup_wandb_env(
+    logging_cfg: DictConfig,
+    experiment_name: str | None = None,
+    tags_override: list[str] | None = None,
+) -> None:
     report_to = to_report_to_list(logging_cfg.get("report_to"))
     if "wandb" not in report_to:
         return
@@ -62,10 +67,11 @@ def setup_wandb_env(logging_cfg: DictConfig, experiment_name: str | None = None)
     if entity:
         os.environ.setdefault("WANDB_ENTITY", str(entity))
 
-    tags = wandb_cfg.get("tags")
+    tags = tags_override if tags_override is not None else wandb_cfg.get("tags")
     if tags:
-        tag_values = [str(tag) for tag in tags]
-        os.environ.setdefault("WANDB_TAGS", ",".join(tag_values))
+        tag_values = [str(tag) for tag in tags if str(tag).strip()]
+        if tag_values:
+            os.environ["WANDB_TAGS"] = ",".join(tag_values)
 
     notes = wandb_cfg.get("notes")
     if notes:
@@ -73,3 +79,17 @@ def setup_wandb_env(logging_cfg: DictConfig, experiment_name: str | None = None)
 
     if experiment_name:
         os.environ.setdefault("WANDB_NAME", str(experiment_name))
+
+
+def suppress_noisy_library_logs() -> None:
+    """
+    Reduce noisy INFO logs from HF/http clients during train/preprocess/eval.
+    """
+    for logger_name in (
+        "httpx",
+        "httpcore",
+        "huggingface_hub",
+        "transformers",
+        "datasets",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)

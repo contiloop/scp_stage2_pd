@@ -23,7 +23,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from transformers import AutoTokenizer
 from trl import pack_dataset
 
-from .common import resolve_workspace_path
+from .common import resolve_workspace_path, suppress_noisy_library_logs
 
 
 def resolve_local_dataset_snapshot(repo_id: str) -> Path | None:
@@ -327,6 +327,8 @@ def prepare_save_path(path: Path, overwrite: bool) -> None:
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
+    suppress_noisy_library_logs()
+
     print("=" * 80)
     print("CPT Preprocess Config")
     print("=" * 80)

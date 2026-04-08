@@ -10,6 +10,8 @@ Supports:
 from __future__ import annotations
 
 import inspect
+import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,12 @@ from omegaconf import DictConfig, OmegaConf
 from transformers.trainer_utils import get_last_checkpoint
 from trl import SFTConfig, SFTTrainer
 
-from .common import resolve_workspace_path, setup_wandb_env, to_report_to_list
+from .common import (
+    resolve_workspace_path,
+    setup_wandb_env,
+    suppress_noisy_library_logs,
+    to_report_to_list,
+)
 
 
 class CausalPackedCollator:
@@ -50,6 +57,85 @@ class CausalPackedCollator:
             "labels": label_tensor,
             "attention_mask": attention_mask,
         }
+
+
+class LayerGradNormTrainer(SFTTrainer):
+    """
+    Log layer-wise gradient norms to W&B at logging_steps cadence.
+    """
+
+    def __init__(self, *args, grad_norm_logging_enabled: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.grad_norm_logging_enabled = bool(grad_norm_logging_enabled)
+        self._optimizer_hook_installed = False
+        self._layer_pattern = re.compile(r"\.(\d+)\.")
+
+    def _should_log_gradient_stats(self) -> bool:
+        if not self.grad_norm_logging_enabled:
+            return False
+        logging_steps = int(getattr(self.args, "logging_steps", 0) or 0)
+        if logging_steps <= 0:
+            return False
+        return (self.state.global_step + 1) % logging_steps == 0
+
+    def _install_optimizer_hook(self) -> None:
+        if self._optimizer_hook_installed:
+            return
+        original_step = self.optimizer.step
+        trainer_ref = self
+
+        def hooked_step(*args, **kwargs):
+            if trainer_ref._should_log_gradient_stats():
+                trainer_ref._log_layer_grad_norms()
+            return original_step(*args, **kwargs)
+
+        self.optimizer.step = hooked_step
+        self._optimizer_hook_installed = True
+
+    def create_optimizer(self):
+        super().create_optimizer()
+        self._install_optimizer_hook()
+
+    def _extract_layer_idx(self, param_name: str) -> int | None:
+        match = self._layer_pattern.search(param_name)
+        if match is None:
+            return None
+        return int(match.group(1))
+
+    @torch.no_grad()
+    def _log_layer_grad_norms(self) -> None:
+        layer_squares: dict[int, float] = {}
+        total_sq = 0.0
+        grad_param_count = 0
+
+        for name, parameter in self.model.named_parameters():
+            if parameter.grad is None:
+                continue
+
+            grad_sq = float(parameter.grad.detach().float().pow(2).sum().item())
+            total_sq += grad_sq
+            grad_param_count += 1
+
+            layer_idx = self._extract_layer_idx(name)
+            if layer_idx is None:
+                continue
+            layer_squares[layer_idx] = layer_squares.get(layer_idx, 0.0) + grad_sq
+
+        payload: dict[str, float] = {
+            "grad_norm/total": math.sqrt(max(total_sq, 0.0)),
+            "grad_norm/param_count": float(grad_param_count),
+        }
+        for layer_idx in sorted(layer_squares):
+            payload[f"grad_norm/layer_{layer_idx:02d}"] = math.sqrt(max(layer_squares[layer_idx], 0.0))
+
+        try:
+            import wandb
+
+            if wandb.run is not None:
+                wandb.log(payload, commit=False)
+        except Exception:
+            # Keep training robust even if wandb import/logging fails.
+            return
 
 
 def is_vision_model(model_name: str) -> bool:
@@ -174,13 +260,22 @@ def contains_cross_sample_packing(dataset: Dataset, probe_rows: int = 64) -> boo
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
+    suppress_noisy_library_logs()
+
     print("=" * 80)
     print("CPT Train Config")
     print("=" * 80)
     print(OmegaConf.to_yaml(cfg, resolve=True))
 
-    run_name = str(cfg.logging.get("run_name") or f"{cfg.experiment.name}-{cfg.finetune.method}")
-    setup_wandb_env(cfg.logging, experiment_name=run_name)
+    run_name_cfg = cfg.logging.get("run_name")
+    run_name = str(run_name_cfg).strip() if run_name_cfg is not None else ""
+    model_tag = str(cfg.model.pretrained_model_name_or_path).split("/")[-1].lower()
+    finetune_tag = str(cfg.finetune.method).lower()
+    wandb_tags = [model_tag, finetune_tag]
+    if run_name:
+        setup_wandb_env(cfg.logging, experiment_name=run_name, tags_override=wandb_tags)
+    else:
+        setup_wandb_env(cfg.logging, experiment_name=None, tags_override=wandb_tags)
 
     model_name = str(cfg.model.pretrained_model_name_or_path)
     finetune_method = str(cfg.finetune.method).lower()
@@ -291,10 +386,10 @@ def main(cfg: DictConfig) -> None:
         "fp16": use_fp16,
         "gradient_checkpointing": bool(cfg.training.gradient_checkpointing),
         "report_to": report_to if report_to else "none",
-        "run_name": run_name,
         "seed": int(cfg.training.seed),
         "save_strategy": str(cfg.training.save_strategy),
     }
+    _set_if_supported(sft_kwargs, sft_fields, "run_name", run_name if run_name else None)
     _set_if_supported(
         sft_kwargs,
         sft_fields,
@@ -333,12 +428,16 @@ def main(cfg: DictConfig) -> None:
     if base_tokenizer.eos_token_id is not None:
         base_tokenizer.eos_token = base_tokenizer.convert_ids_to_tokens(base_tokenizer.eos_token_id)
 
-    trainer = SFTTrainer(
+    grad_norm_cfg = cfg.training.get("grad_norm_logging")
+    grad_norm_enabled = bool(grad_norm_cfg and grad_norm_cfg.get("enabled", False))
+
+    trainer = LayerGradNormTrainer(
         model=model,
         args=args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset if has_eval else None,
         processing_class=base_tokenizer,
+        grad_norm_logging_enabled=grad_norm_enabled,
         data_collator=(
             None
             if use_runtime_packing
