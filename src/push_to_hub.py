@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 from pathlib import Path
+import shutil
 
 from huggingface_hub import HfApi
 from hydra import compose, initialize_config_dir
@@ -48,6 +50,46 @@ def resolve_upload_folder(output_dir: Path, checkpoint: str) -> Path:
     return candidate
 
 
+def maybe_upload_eval_artifacts(
+    api: HfApi,
+    repo_id: str,
+    upload_folder: Path,
+    experiment_root: Path,
+    commit_message: str,
+) -> None:
+    eval_root = experiment_root / "eval"
+    if not eval_root.exists():
+        print("[INFO] No eval directory found. Skipping eval upload.")
+        return
+
+    model_eval_dir = eval_root / "lm_eval" / upload_folder.name
+    summary_path = eval_root / "summary.json"
+
+    if not model_eval_dir.exists() and not summary_path.exists():
+        print(f"[INFO] No eval artifacts for '{upload_folder.name}'. Skipping eval upload.")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="hf_eval_upload_") as tmpdir:
+        staging_root = Path(tmpdir)
+        target_eval_root = staging_root / "eval"
+        target_eval_root.mkdir(parents=True, exist_ok=True)
+
+        if summary_path.exists():
+            shutil.copy2(summary_path, target_eval_root / "summary.json")
+
+        if model_eval_dir.exists():
+            shutil.copytree(model_eval_dir, target_eval_root / upload_folder.name, dirs_exist_ok=True)
+
+        api.upload_folder(
+            repo_id=repo_id,
+            folder_path=str(target_eval_root),
+            repo_type="model",
+            path_in_repo="eval",
+            commit_message=f"{commit_message} (eval artifacts)",
+        )
+    print(f"[INFO] Uploaded eval artifacts for: {upload_folder.name}")
+
+
 def main() -> None:
     suppress_noisy_library_logs()
 
@@ -62,10 +104,17 @@ def main() -> None:
     )
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--commit-message", default=None)
+    parser.add_argument(
+        "--include-eval",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Upload matching eval artifacts (summary + lm_eval/<checkpoint_or_output_dir_name>) to repo/eval",
+    )
     args = parser.parse_args()
 
     cfg = compose_cfg(args.config_path, args.config_name)
     output_dir = resolve_workspace_path(cfg.training.output_dir)
+    experiment_root = resolve_workspace_path(cfg.experiment.output_root)
     if not output_dir.exists():
         raise FileNotFoundError(f"Training output dir not found: {output_dir}")
 
@@ -95,6 +144,15 @@ def main() -> None:
         repo_type="model",
         commit_message=message,
     )
+
+    if bool(args.include_eval):
+        maybe_upload_eval_artifacts(
+            api=api,
+            repo_id=args.repo,
+            upload_folder=upload_folder,
+            experiment_root=experiment_root,
+            commit_message=message,
+        )
 
     print("=" * 80)
     print("Upload Complete")

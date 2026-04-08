@@ -74,7 +74,7 @@ Train-time eval batch still uses `training.per_device_eval_batch_size`.
 - Input embeddings are frozen by default (`training.freeze_embeddings=true`)
 - Runtime packing (train-time): `training.runtime_packing.enabled=true` (`bfd_split`, `padding_free=true`)
 - Preprocessing packing: `preprocessing.packing.enabled=false` (store unpacked records)
-- Checkpoint policy: `save_strategy=steps`, `save_steps=500`, `save_total_limit=3`
+- Checkpoint policy: `save_strategy=steps`, `save_steps=200`, `save_total_limit=1`
 
 ## Config Usage
 
@@ -109,6 +109,13 @@ make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=latest
 
 # upload specific checkpoint
 make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=checkpoint-1500
+
+# default behavior: upload matching eval artifacts together
+# (eval/summary.json + eval/lm_eval/<checkpoint_or_output_dir_name>/...)
+make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=latest
+
+# model-only upload (skip eval artifacts)
+python -m src.push_to_hub --config-path configs --config-name full_96gb --repo your-name/your-model --checkpoint latest --no-include-eval
 ```
 
 GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):

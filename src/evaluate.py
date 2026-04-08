@@ -94,6 +94,26 @@ def compute_ppl(model, dataset, batch_size: int = 4, max_batches: int | None = N
     }
 
 
+def _run_streaming(cmd: list[str]) -> tuple[int, str]:
+    """
+    Stream child process logs to the current terminal while keeping a copy for error summaries.
+    """
+    captured_chunks: list[str] = []
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for chunk in process.stdout:
+        captured_chunks.append(chunk)
+        print(chunk, end="", flush=True)
+    return_code = process.wait()
+    return return_code, "".join(captured_chunks)
+
+
 def run_lm_eval(model_path: str, tasks: str, batch_size: int, limit: int, output_path: Path) -> tuple[dict[str, Any], str]:
     cmd = [
         sys.executable,
@@ -113,16 +133,16 @@ def run_lm_eval(model_path: str, tasks: str, batch_size: int, limit: int, output
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        stderr_tail = result.stderr[-1200:] if result.stderr else "no stderr"
+    return_code, captured = _run_streaming(cmd)
+    if return_code != 0:
+        stderr_tail = captured[-1200:] if captured else "no stderr"
         raise RuntimeError(f"lm-eval failed: {stderr_tail}")
 
     results = {}
     for candidate in sorted(output_path.rglob("results_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         results = json.loads(candidate.read_text(encoding="utf-8"))
         break
-    return results, result.stdout
+    return results, captured
 
 
 def _model_args_for_lm_eval(model_path: Path, base_model: str) -> str:
@@ -150,16 +170,16 @@ def run_lm_eval_with_model_args(model_args: str, tasks: str, batch_size: int, li
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        stderr_tail = result.stderr[-1200:] if result.stderr else "no stderr"
+    return_code, captured = _run_streaming(cmd)
+    if return_code != 0:
+        stderr_tail = captured[-1200:] if captured else "no stderr"
         raise RuntimeError(f"lm-eval failed: {stderr_tail}")
 
     results = {}
     for candidate in sorted(output_path.rglob("results_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         results = json.loads(candidate.read_text(encoding="utf-8"))
         break
-    return results, result.stdout
+    return results, captured
 
 
 def resolve_tasks(args) -> str:
