@@ -17,7 +17,7 @@ Independent CPT pipeline using Hydra + Unsloth + W&B.
 
 git clone https://github.com/contiloop/scp_stage1_cpt.git
 cd scp_stage1_cpt
-make setup
+make set                   # includes causal_conv1d kernel check (rebuilds only if needed)
 python -c "from huggingface_hub import login; login(token='hf_xxxxxxx')"
 wandb login                # optional
 make preprocess
@@ -31,7 +31,7 @@ make train config=full
 
 ```bash
 cd scp_stage1_cpt
-make setup
+make set
 make preprocess
 make train config=full
 make eval
@@ -40,6 +40,7 @@ make eval
 ## What Each Make Target Does
 
 - `make preprocess`: downloads/loads raw dataset and writes processed train/val dataset
+- `make set`: installs dependencies, checks `causal_conv1d` CUDA kernel runtime, and only rebuilds when needed (Blackwell uses source build fallback)
 - `make train`: runs CPT training from config (`config=...` selects config file)
 - `make train-resume`: resumes from latest checkpoint (`training.resume_from_checkpoint=auto`)
 - `make eval`: runs validation PPL for base + CPT model, then lm-eval on CPT model

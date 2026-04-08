@@ -1,4 +1,4 @@
-.PHONY: setup set preprocess train train-resume eval eval-benchmarks eval-benchmarks-base eval-benchmarks-both show-config push-to-hub
+.PHONY: setup set verify-cuda-kernels preprocess train train-resume eval eval-benchmarks eval-benchmarks-base eval-benchmarks-both show-config push-to-hub inspect-step
 
 PYTHON ?= python3
 config ?= config
@@ -8,43 +8,52 @@ HF_REPO ?=
 CKPT ?= final
 HF_PRIVATE ?= false
 
+define WITH_TORCH_LIB
+TORCH_LIB_DIR="$$( $(PYTHON) -c 'import os, torch; print(os.path.join(os.path.dirname(torch.__file__), "lib"))' )"; \
+export LD_LIBRARY_PATH="$$TORCH_LIB_DIR:$${LD_LIBRARY_PATH:-}"; \
+$(1)
+endef
+
 setup:
 	$(PYTHON) -m pip install -e . --no-deps -q
 	$(PYTHON) -m pip install -U huggingface_hub -q
 	$(PYTHON) -m pip install "transformers>=5.2.0,<=5.3.0" "trl>=0.15.0" --no-deps -q
 	$(PYTHON) -m pip install "hydra-core>=1.3.2" "omegaconf>=2.3.0" -q
 	$(PYTHON) -m pip install --upgrade unsloth unsloth-zoo --no-deps -q
-	$(PYTHON) -c "import causal_conv1d" 2>/dev/null || $(PYTHON) -m pip install causal-conv1d -q
+	PYTHON=$(PYTHON) bash scripts/ensure_causal_conv1d.sh
 	$(PYTHON) -c "from fla.ops.gated_delta_rule import chunk_gated_delta_rule" 2>/dev/null || $(PYTHON) -m pip install flash-linear-attention -q
 	@$(PYTHON) -c "import torch; print('  flash_sdp:', torch.backends.cuda.flash_sdp_enabled())"
 	$(PYTHON) -m pip install lm-eval -q 2>/dev/null || true
 
-set: setup
+set: setup verify-cuda-kernels
+
+verify-cuda-kernels:
+	@$(call WITH_TORCH_LIB,$(PYTHON) -c "import importlib, os, torch; gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'; cc=torch.cuda.get_device_capability(0) if torch.cuda.is_available() else 'N/A'; torch_lib=os.path.join(os.path.dirname(torch.__file__), 'lib'); print(f'  gpu: {gpu}'); print(f'  cc: {cc}'); print(f'  torch cuda: {torch.version.cuda}'); print(f'  torch lib: {torch_lib}'); importlib.import_module('causal_conv1d_cuda'); print('  causal_conv1d_cuda: ok')")
 
 preprocess:
-	$(PYTHON) -m src.preprocess --config-path ../configs --config-name $(config) $(ovr)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.preprocess --config-path ../configs --config-name $(config) $(ovr))
 
 train:
-	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr))
 
 train-resume:
-	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) training.resume_from_checkpoint=auto $(ovr)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.train --config-path ../configs --config-name $(config) training.resume_from_checkpoint=auto $(ovr))
 
 eval:
-	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --limit $(limit)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --limit $(limit))
 
 eval-benchmarks:
-	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target cpt --limit $(limit)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target cpt --limit $(limit))
 
 eval-benchmarks-base:
-	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target base --limit $(limit)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target base --limit $(limit))
 
 eval-benchmarks-both:
-	$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target both --limit $(limit)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.evaluate --config-path configs --config-name $(config) --benchmarks_only --bench_target both --limit $(limit))
 
 show-config:
-	$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr) --cfg job
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.train --config-path ../configs --config-name $(config) $(ovr) --cfg job)
 
 push-to-hub:
 	@if [ -z "$(HF_REPO)" ]; then echo "HF_REPO is required. Example: make push-to-hub HF_REPO=your-name/your-model"; exit 1; fi
-	$(PYTHON) -m src.push_to_hub --config-path configs --config-name $(config) --repo $(HF_REPO) --checkpoint $(CKPT) $(if $(filter true,$(HF_PRIVATE)),--private,)
+	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.push_to_hub --config-path configs --config-name $(config) --repo $(HF_REPO) --checkpoint $(CKPT) $(if $(filter true,$(HF_PRIVATE)),--private,))
