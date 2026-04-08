@@ -9,6 +9,7 @@ Supports:
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,8 @@ def main(cfg: DictConfig) -> None:
     setup_wandb_env(cfg.logging, experiment_name=run_name)
 
     model_name = str(cfg.model.pretrained_model_name_or_path)
+    finetune_method = str(cfg.finetune.method).lower()
+    wants_full_finetuning = finetune_method == "full"
     vision = is_vision_model(model_name)
     if vision:
         from unsloth import FastVisionModel as ModelClass
@@ -182,12 +185,17 @@ def main(cfg: DictConfig) -> None:
         from unsloth import FastLanguageModel as ModelClass
         print(f"loading model (language backend): {model_name}")
 
-    model, tokenizer = ModelClass.from_pretrained(
-        model_name=model_name,
-        max_seq_length=int(cfg.model.max_seq_length),
-        dtype=None,
-        load_in_4bit=bool(cfg.model.quantization.load_in_4bit),
-    )
+    from_pretrained_kwargs: dict[str, Any] = {
+        "model_name": model_name,
+        "max_seq_length": int(cfg.model.max_seq_length),
+        "dtype": None,
+        "load_in_4bit": bool(cfg.model.quantization.load_in_4bit),
+    }
+    # Unsloth needs full_finetuning=True to avoid silently routing to LoRA mode.
+    if "full_finetuning" in inspect.signature(ModelClass.from_pretrained).parameters:
+        from_pretrained_kwargs["full_finetuning"] = wants_full_finetuning
+
+    model, tokenizer = ModelClass.from_pretrained(**from_pretrained_kwargs)
 
     if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -202,6 +210,11 @@ def main(cfg: DictConfig) -> None:
     print(f"total params: {total_params:,}")
     print(f"trainable params: {trainable_params:,}")
     print(f"trainable ratio: {100.0 * trainable_params / total_params:.4f}%")
+    if wants_full_finetuning and trainable_params == 0:
+        raise RuntimeError(
+            "Full-weight mode selected, but trainable params = 0. "
+            "Check Unsloth full_finetuning path and model loading config."
+        )
     if str(cfg.finetune.method).lower() == "lora":
         model.print_trainable_parameters()
 
@@ -247,7 +260,6 @@ def main(cfg: DictConfig) -> None:
     sft_fields = set(SFTConfig.__dataclass_fields__.keys())
     sft_kwargs: dict[str, Any] = {
         "output_dir": str(output_dir),
-        "overwrite_output_dir": bool(cfg.training.overwrite_output_dir),
         "learning_rate": float(cfg.training.learning_rate),
         "optim": str(cfg.training.optim),
         "lr_scheduler_type": str(cfg.training.lr_scheduler_type),
@@ -275,6 +287,12 @@ def main(cfg: DictConfig) -> None:
         "seed": int(cfg.training.seed),
         "save_strategy": str(cfg.training.save_strategy),
     }
+    _set_if_supported(
+        sft_kwargs,
+        sft_fields,
+        "overwrite_output_dir",
+        bool(cfg.training.overwrite_output_dir),
+    )
 
     if use_runtime_packing:
         _set_if_supported(sft_kwargs, sft_fields, "dataset_text_field", "text")

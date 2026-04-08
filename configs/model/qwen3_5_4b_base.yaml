@@ -1,4 +1,4 @@
-pretrained_model_name_or_path: "unsloth/gemma-3-4b-pt"
+pretrained_model_name_or_path: "unsloth/Qwen3.5-4B-Base"
 tokenizer_name_or_path: null
 trust_remote_code: true
 
@@ -13,4 +13,3 @@ quantization:
   bnb_4bit_compute_dtype: "bfloat16"
   bnb_4bit_quant_type: "nf4"
   bnb_4bit_use_double_quant: true
-

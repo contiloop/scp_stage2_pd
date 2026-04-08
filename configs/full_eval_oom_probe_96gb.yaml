@@ -1,6 +1,6 @@
 defaults:
   - data: korean_financial_cpt
-  - model: gemma3_4b
+  - model: qwen3_5_4b_base
   - finetune: full
   - preprocessing: default
   - training: gpu96
