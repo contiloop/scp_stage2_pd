@@ -47,4 +47,4 @@ show-config:
 
 push-to-hub:
 	@if [ -z "$(HF_REPO)" ]; then echo "HF_REPO is required. Example: make push-to-hub HF_REPO=your-name/your-model"; exit 1; fi
-	$(PYTHON) -m src.push_to_hub --config-path ../configs --config-name $(config) --repo $(HF_REPO) --checkpoint $(CKPT) $(if $(filter true,$(HF_PRIVATE)),--private,)
+	$(PYTHON) -m src.push_to_hub --config-path configs --config-name $(config) --repo $(HF_REPO) --checkpoint $(CKPT) $(if $(filter true,$(HF_PRIVATE)),--private,)
