@@ -17,7 +17,7 @@ endef
 setup:
 	$(PYTHON) -m pip install -e . --no-deps -q
 	$(PYTHON) -m pip install -U huggingface_hub -q
-	$(PYTHON) -m pip install "transformers>=5.2.0,<=5.3.0" "trl>=0.15.0" --no-deps -q
+	$(PYTHON) -m pip install "transformers>=5.4.0" "trl>=0.15.0" --no-deps -q
 	$(PYTHON) -m pip install "hydra-core>=1.3.2" "omegaconf>=2.3.0" -q
 	$(PYTHON) -m pip install --upgrade unsloth unsloth-zoo --no-deps -q
 	PYTHON=$(PYTHON) bash scripts/ensure_causal_conv1d.sh
