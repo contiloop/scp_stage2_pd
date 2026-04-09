@@ -28,7 +28,7 @@ setup:
 set: setup verify-cuda-kernels
 
 verify-cuda-kernels:
-	@$(call WITH_TORCH_LIB,$(PYTHON) -c "import importlib, os, torch; gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'; cc=torch.cuda.get_device_capability(0) if torch.cuda.is_available() else 'N/A'; torch_lib=os.path.join(os.path.dirname(torch.__file__), 'lib'); print(f'  gpu: {gpu}'); print(f'  cc: {cc}'); print(f'  torch cuda: {torch.version.cuda}'); print(f'  torch lib: {torch_lib}'); importlib.import_module('causal_conv1d_cuda'); print('  causal_conv1d_cuda: ok')")
+	PYTHON=$(PYTHON) bash scripts/verify_cuda_kernels.sh
 
 preprocess:
 	@$(call WITH_TORCH_LIB,$(PYTHON) -m src.preprocess --config-path ../configs --config-name $(config) $(ovr))
