@@ -7,9 +7,15 @@ TORCH_LIB_DIR="$("$PYTHON_BIN" -c 'import os, torch; print(os.path.join(os.path.
 export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 
 CC="$("$PYTHON_BIN" -c 'import torch; print(".".join(map(str, torch.cuda.get_device_capability(0))) if torch.cuda.is_available() else "cpu")')"
-CURRENT_VER="$("$PYTHON_BIN" -c 'import importlib.metadata as m; \
-try: print(m.version("causal-conv1d")) \
-except Exception: print("missing")')"
+CURRENT_VER="$("$PYTHON_BIN" - <<'PY'
+import importlib.metadata as m
+
+try:
+    print(m.version("causal-conv1d"))
+except Exception:
+    print("missing")
+PY
+)"
 
 echo "  causal_conv1d check: cc=${CC}, current=${CURRENT_VER}"
 
