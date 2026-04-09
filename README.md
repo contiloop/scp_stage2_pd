@@ -68,7 +68,7 @@ Train-time eval batch still uses `training.per_device_eval_batch_size`.
 
 ## Key Defaults
 
-- Dataset source: `alwaysgood/korean-financial-cpt`
+- Dataset source: `alwaysgood/korean-financial-cpt` + `alwaysgood/korean_rlhf_content_filtered`
 - Backend: Unsloth (`FastLanguageModel` / `FastVisionModel`)
 - Logging: W&B
 - Input embeddings are frozen by default (`training.freeze_embeddings=true`)
@@ -100,6 +100,14 @@ make train config=lora
 
 # switch model profile (example: Gemma 4 E2B)
 make train config=full_96gb ovr="model=gemma_4_e2b"
+
+# full flow on a new instance for Gemma 4 E2B
+make set
+make preprocess ovr="model=gemma_4_e2b"
+make train config=full_96gb ovr="model=gemma_4_e2b"
+
+# multi-source preprocessing (financial + RLHF content)
+make preprocess config=full_96gb ovr="data=korean_financial_plus_rlhf"
 
 # resume from last checkpoint
 make train-resume config=full

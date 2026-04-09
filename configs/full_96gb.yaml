@@ -1,5 +1,5 @@
 defaults:
-  - data: korean_financial_cpt
+  - data: korean_financial_plus_rlhf
   - model: qwen3_5_4b_base
   - finetune: full
   - preprocessing: default

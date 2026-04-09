@@ -26,6 +26,18 @@ from trl import pack_dataset
 from .common import resolve_workspace_path, suppress_noisy_library_logs
 
 
+def resolve_dataset_cfgs(cfg: DictConfig) -> list[DictConfig]:
+    datasets = cfg.data.get("datasets")
+    if datasets is not None:
+        return [dataset_cfg for dataset_cfg in datasets]
+
+    dataset = cfg.data.get("dataset")
+    if dataset is not None:
+        return [dataset]
+
+    raise RuntimeError("Config must include either data.dataset or data.datasets.")
+
+
 def resolve_local_dataset_snapshot(repo_id: str) -> Path | None:
     """
     Return latest local HF dataset snapshot path if available.
@@ -212,10 +224,7 @@ def build_unpacked_records(cfg: DictConfig, tokenizer) -> tuple[list[dict[str, A
     )
 
     min_chars = int(cfg.preprocessing.cleaning.min_chars)
-    text_fields = [str(x) for x in cfg.data.text_fields]
-    source_column = cfg.data.get("source_column")
-    id_column = cfg.data.get("id_column")
-    default_source = str(cfg.data.dataset.path)
+    default_text_fields = [str(x) for x in cfg.data.text_fields]
 
     records: list[dict[str, Any]] = []
     doc_count = 0
@@ -223,54 +232,70 @@ def build_unpacked_records(cfg: DictConfig, tokenizer) -> tuple[list[dict[str, A
     skipped_short = 0
     chunk_count = 0
 
-    for row_idx, row in iter_dataset_rows(cfg.data.dataset):
-        text = extract_text(row, text_fields=text_fields)
-        if text is None:
-            skipped_empty += 1
-            continue
+    dataset_cfgs = resolve_dataset_cfgs(cfg)
+    for dataset_idx, dataset_cfg in enumerate(dataset_cfgs):
+        text_fields = dataset_cfg.get("text_fields")
+        if text_fields is None:
+            text_fields = default_text_fields
+        else:
+            text_fields = [str(x) for x in text_fields]
 
-        if len(text) < min_chars:
-            skipped_short += 1
-            continue
+        source_column = dataset_cfg.get("source_column", cfg.data.get("source_column"))
+        id_column = dataset_cfg.get("id_column", cfg.data.get("id_column"))
+        default_source = str(dataset_cfg.path)
 
-        doc_count += 1
-        source = str(row.get(source_column, default_source)) if source_column else default_source
-        doc_id = str(row.get(id_column, f"row:{row_idx}")) if id_column else f"row:{row_idx}"
-
-        chunks = chunk_boundary_first(
-            text=text,
-            tokenizer=tokenizer,
-            max_body_tokens=max_body_tokens,
-            para_sep_ids=para_sep_ids,
-        )
-
-        total_chunks = len(chunks)
-        for chunk_idx, chunk_ids in enumerate(chunks):
-            if not chunk_ids:
+        for row_idx, row in iter_dataset_rows(dataset_cfg):
+            text = extract_text(row, text_fields=text_fields)
+            if text is None:
+                skipped_empty += 1
                 continue
 
-            is_doc_end = chunk_idx == total_chunks - 1
-            input_ids = list(chunk_ids)
+            if len(text) < min_chars:
+                skipped_short += 1
+                continue
 
-            if is_doc_end and input_ids[-1] != eos_id:
-                input_ids.append(eos_id)
-
-            if len(input_ids) > max_length:
-                input_ids = input_ids[:max_length]
-
-            records.append(
-                {
-                    "doc_id": doc_id,
-                    "source": source,
-                    "chunk_id": chunk_idx,
-                    "is_doc_end": is_doc_end,
-                    "text": tokenizer.decode(input_ids, skip_special_tokens=False),
-                    "input_ids": input_ids,
-                    "labels": list(input_ids),
-                    "seq_lengths": [len(input_ids)],
-                }
+            doc_count += 1
+            source = str(row.get(source_column, default_source)) if source_column else default_source
+            doc_id = (
+                str(row.get(id_column, f"row:{dataset_idx}:{row_idx}"))
+                if id_column
+                else f"row:{dataset_idx}:{row_idx}"
             )
-            chunk_count += 1
+
+            chunks = chunk_boundary_first(
+                text=text,
+                tokenizer=tokenizer,
+                max_body_tokens=max_body_tokens,
+                para_sep_ids=para_sep_ids,
+            )
+
+            total_chunks = len(chunks)
+            for chunk_idx, chunk_ids in enumerate(chunks):
+                if not chunk_ids:
+                    continue
+
+                is_doc_end = chunk_idx == total_chunks - 1
+                input_ids = list(chunk_ids)
+
+                if is_doc_end and input_ids[-1] != eos_id:
+                    input_ids.append(eos_id)
+
+                if len(input_ids) > max_length:
+                    input_ids = input_ids[:max_length]
+
+                records.append(
+                    {
+                        "doc_id": doc_id,
+                        "source": source,
+                        "chunk_id": chunk_idx,
+                        "is_doc_end": is_doc_end,
+                        "text": tokenizer.decode(input_ids, skip_special_tokens=False),
+                        "input_ids": input_ids,
+                        "labels": list(input_ids),
+                        "seq_lengths": [len(input_ids)],
+                    }
+                )
+                chunk_count += 1
 
     stats = {
         "docs_kept": doc_count,
@@ -342,15 +367,21 @@ def main(cfg: DictConfig) -> None:
     if tokenizer.eos_token_id is None:
         raise RuntimeError(f"Tokenizer '{tokenizer_name}' has no eos token id")
 
+    dataset_cfgs = resolve_dataset_cfgs(cfg)
     unpacked_records, stats = build_unpacked_records(cfg, tokenizer=tokenizer)
-    if not unpacked_records and bool(cfg.data.dataset.get("prefer_local_snapshot", True)):
+    if not unpacked_records and any(bool(ds.get("prefer_local_snapshot", True)) for ds in dataset_cfgs):
         print(
             "[WARN] No records built from local snapshot path. "
             "Retrying with HF Hub streaming."
         )
         with open_dict(cfg):
-            cfg.data.dataset.prefer_local_snapshot = False
-            cfg.data.dataset.streaming = True
+            if cfg.data.get("datasets") is not None:
+                for dataset_cfg in cfg.data.datasets:
+                    dataset_cfg.prefer_local_snapshot = False
+                    dataset_cfg.streaming = True
+            else:
+                cfg.data.dataset.prefer_local_snapshot = False
+                cfg.data.dataset.streaming = True
         unpacked_records, stats = build_unpacked_records(cfg, tokenizer=tokenizer)
 
     if not unpacked_records:
@@ -381,9 +412,11 @@ def main(cfg: DictConfig) -> None:
         prepare_save_path(val_dir, overwrite=overwrite)
         val_ds.save_to_disk(str(val_dir))
 
+    source_paths = [str(dataset_cfg.path) for dataset_cfg in dataset_cfgs]
+    source_splits = [str(dataset_cfg.split) for dataset_cfg in dataset_cfgs]
     metadata = {
-        "source": str(cfg.data.dataset.path),
-        "split": str(cfg.data.dataset.split),
+        "source": source_paths[0] if len(source_paths) == 1 else source_paths,
+        "split": source_splits[0] if len(source_splits) == 1 else source_splits,
         "text_fields": [str(x) for x in cfg.data.text_fields],
         "packing": {
             "enabled": bool(cfg.preprocessing.packing.enabled),
