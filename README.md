@@ -98,6 +98,9 @@ make train config=full_eval_oom_probe_96gb
 # LoRA (configs/lora.yaml)
 make train config=lora
 
+# switch model profile (example: Gemma 4 E2B)
+make train config=full_96gb ovr="model=gemma_4_e2b"
+
 # resume from last checkpoint
 make train-resume config=full
 
