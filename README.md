@@ -37,10 +37,17 @@ make train config=full
 make eval
 ```
 
+For Gemma-only workflows (no `causal_conv1d` dependency), you can skip that setup:
+
+```bash
+make set SKIP_CAUSAL_CONV1D=1
+```
+
 ## What Each Make Target Does
 
 - `make preprocess`: downloads/loads raw dataset and writes processed train/val dataset
 - `make set`: installs dependencies, checks `causal_conv1d` CUDA kernel runtime, and only rebuilds when needed (Blackwell uses source build fallback)
+  - skip `causal_conv1d` setup/verification via `make set SKIP_CAUSAL_CONV1D=1`
   - installs `transformers>=5.4.0` (required for `unsloth/gemma-4-E2B`)
 - `make train`: runs CPT training from config (`config=...` selects config file)
 - `make train-resume`: resumes from latest checkpoint (`training.resume_from_checkpoint=auto`)
@@ -113,21 +120,14 @@ make preprocess config=full_96gb ovr="data=korean_financial_plus_rlhf"
 # resume from last checkpoint
 make train-resume config=full
 
-# upload final output dir (default CKPT=final)
+# upload final output dir (default CKPT=final, eval artifacts included when matched)
 make push-to-hub config=full_96gb HF_REPO=your-name/your-model
 
-# upload latest checkpoint folder
-make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=latest
-
-# upload specific checkpoint
-make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=checkpoint-1500
-
-# default behavior: upload matching eval artifacts together
-# (eval/summary.json + eval/lm_eval/<checkpoint_or_output_dir_name>/...)
-make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=latest
+# upload specific checkpoint (recommended)
+make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=checkpoint-3500
 
 # model-only upload (skip eval artifacts)
-python -m src.push_to_hub --config-path configs --config-name full_96gb --repo your-name/your-model --checkpoint latest --no-include-eval
+python -m src.push_to_hub --config-path configs --config-name full_96gb --repo your-name/your-model --checkpoint checkpoint-3500 --no-include-eval
 ```
 
 GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):
