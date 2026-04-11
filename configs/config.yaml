@@ -3,16 +3,16 @@ defaults:
   - model: qwen3_5_4b_base
   - finetune: full
   - preprocessing: default
-  - training: default
-  - evaluation: default
+  - training: gpu96
+  - evaluation: gpu96
   - logging: wandb
   - _self_
 
 seed: 42
 
 experiment:
-  name: "korean-financial-cpt-full"
-  output_root: "artifacts/cpt_full"
+  name: "korean-financial-cpt-full-96gb"
+  output_root: "artifacts/cpt_full_96gb"
   processed_dir: "data/processed/cpt_korean_financial"
 
 hydra:
