@@ -138,26 +138,13 @@ class LayerGradNormTrainer(SFTTrainer):
             return
 
 
-def is_vision_model(model_name: str) -> bool:
-    name = model_name.lower()
-    # Qwen3.5 Base/Instruct should run on language backend for text CPT.
-    if "qwen3.5" in name or "qwen3_5" in name:
-        return any(tag in name for tag in ("-vl", "_vl", "vision"))
-
-    # Gemma 3 models in Unsloth are multimodal checkpoints.
-    if "gemma-3" in name or "gemma3" in name:
-        return True
-
-    return any(tag in name for tag in ("-vl", "_vl", "vision"))
-
-
 def count_params(model) -> tuple[int, int]:
     total = sum(parameter.numel() for parameter in model.parameters())
     trainable = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     return total, trainable
 
 
-def apply_finetuning_mode(model, model_class, cfg: DictConfig):
+def apply_finetuning_mode(model, model_class, cfg: DictConfig, vision_backend: bool):
     method = str(cfg.finetune.method).lower()
 
     if method == "full":
@@ -182,7 +169,7 @@ def apply_finetuning_mode(model, model_class, cfg: DictConfig):
         "random_state": int(cfg.training.seed),
     }
 
-    if is_vision_model(cfg.model.pretrained_model_name_or_path):
+    if vision_backend:
         common_kwargs["finetune_vision_layers"] = bool(lora_cfg.finetune_vision_layers)
         common_kwargs["finetune_language_layers"] = bool(lora_cfg.finetune_language_layers)
         common_kwargs["finetune_attention_modules"] = bool(lora_cfg.finetune_attention_modules)
@@ -280,13 +267,7 @@ def main(cfg: DictConfig) -> None:
     model_name = str(cfg.model.pretrained_model_name_or_path)
     finetune_method = str(cfg.finetune.method).lower()
     wants_full_finetuning = finetune_method == "full"
-    vision = is_vision_model(model_name)
-    if vision:
-        from unsloth import FastVisionModel as ModelClass
-        print(f"loading model (vision backend): {model_name}")
-    else:
-        from unsloth import FastLanguageModel as ModelClass
-        print(f"loading model (language backend): {model_name}")
+    from unsloth import FastLanguageModel, FastVisionModel
 
     from_pretrained_kwargs: dict[str, Any] = {
         "model_name": model_name,
@@ -294,11 +275,35 @@ def main(cfg: DictConfig) -> None:
         "dtype": None,
         "load_in_4bit": bool(cfg.model.quantization.load_in_4bit),
     }
-    # Unsloth needs full_finetuning=True to avoid silently routing to LoRA mode.
-    if "full_finetuning" in inspect.signature(ModelClass.from_pretrained).parameters:
-        from_pretrained_kwargs["full_finetuning"] = wants_full_finetuning
 
-    model, tokenizer = ModelClass.from_pretrained(**from_pretrained_kwargs)
+    model = None
+    tokenizer = None
+    backend = None
+    backend_errors: list[str] = []
+    for candidate_backend, candidate_class in (
+        ("vision", FastVisionModel),
+        ("language", FastLanguageModel),
+    ):
+        kwargs = dict(from_pretrained_kwargs)
+        # Unsloth needs full_finetuning=True to avoid silently routing to LoRA mode.
+        if "full_finetuning" in inspect.signature(candidate_class.from_pretrained).parameters:
+            kwargs["full_finetuning"] = wants_full_finetuning
+        try:
+            model, tokenizer = candidate_class.from_pretrained(**kwargs)
+            ModelClass = candidate_class
+            backend = candidate_backend
+            print(f"loading model ({candidate_backend} backend): {model_name}")
+            break
+        except Exception as exc:
+            backend_errors.append(f"{candidate_backend}: {type(exc).__name__}: {exc}")
+
+    if model is None or tokenizer is None or backend is None:
+        joined = "\n".join(backend_errors)
+        raise RuntimeError(
+            "Failed to load model with both vision and language backends.\n"
+            f"model={model_name}\n"
+            f"errors:\n{joined}"
+        )
 
     if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -307,7 +312,12 @@ def main(cfg: DictConfig) -> None:
         frozen_count = freeze_input_embeddings(model)
         print(f"[Freeze] input embeddings frozen params: {frozen_count:,}")
 
-    model = apply_finetuning_mode(model, model_class=ModelClass, cfg=cfg)
+    model = apply_finetuning_mode(
+        model,
+        model_class=ModelClass,
+        cfg=cfg,
+        vision_backend=(backend == "vision"),
+    )
     model.config.use_cache = bool(cfg.model.use_cache)
     total_params, trainable_params = count_params(model)
     print(f"total params: {total_params:,}")
