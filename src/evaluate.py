@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import inspect
 import json
 import math
 import subprocess
@@ -45,7 +46,12 @@ def free_vram() -> None:
         torch.cuda.synchronize()
 
 
-def _load_with_unsloth(path_or_repo: str, max_seq_length: int, model_hint: str):
+def _load_with_unsloth(
+    path_or_repo: str,
+    max_seq_length: int,
+    model_hint: str,
+    full_finetuning: bool = True,
+):
     from unsloth import FastLanguageModel, FastVisionModel
 
     errors: list[str] = []
@@ -59,6 +65,11 @@ def _load_with_unsloth(path_or_repo: str, max_seq_length: int, model_hint: str):
                 max_seq_length=max_seq_length,
                 dtype=None,
                 load_in_4bit=False,
+                **(
+                    {"full_finetuning": full_finetuning}
+                    if "full_finetuning" in inspect.signature(model_class.from_pretrained).parameters
+                    else {}
+                ),
             )
             return model, tokenizer, mode
         except Exception as exc:
@@ -239,7 +250,12 @@ def load_model_for_eval(model_path: Path, base_model: str, max_seq_length: int):
     if adapter_cfg.exists():
         from peft import PeftModel
 
-        base, tokenizer, mode = _load_with_unsloth(base_model, max_seq_length=max_seq_length, model_hint=base_model)
+        base, tokenizer, mode = _load_with_unsloth(
+            base_model,
+            max_seq_length=max_seq_length,
+            model_hint=base_model,
+            full_finetuning=False,
+        )
         model = PeftModel.from_pretrained(base, str(model_path))
         return model, tokenizer, f"{mode}+PEFT"
 
