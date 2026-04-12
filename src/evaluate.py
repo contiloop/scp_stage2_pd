@@ -30,11 +30,6 @@ BENCHMARK_TASKS = "mmlu,hellaswag,arc_easy,arc_challenge,winogrande"
 KOREAN_BENCHMARK_TASKS = "kmmlu,kobest_boolq,kobest_copa,kobest_hellaswag"
 
 
-def is_vision_model(model_name: str) -> bool:
-    vision_keywords = ["qwen3.5", "qwen3_5", "gemma-3", "gemma3"]
-    return any(keyword in model_name.lower() for keyword in vision_keywords)
-
-
 def compose_cfg(config_path: str, config_name: str):
     cfg_dir = resolve_workspace_path(config_path)
     with initialize_config_dir(version_base=None, config_dir=str(cfg_dir)):
@@ -51,20 +46,31 @@ def free_vram() -> None:
 
 
 def _load_with_unsloth(path_or_repo: str, max_seq_length: int, model_hint: str):
-    if is_vision_model(model_hint):
-        from unsloth import FastVisionModel as ModelClass
-        mode = "FastVisionModel"
-    else:
-        from unsloth import FastLanguageModel as ModelClass
-        mode = "FastLanguageModel"
+    from unsloth import FastLanguageModel, FastVisionModel
 
-    model, tokenizer = ModelClass.from_pretrained(
-        model_name=path_or_repo,
-        max_seq_length=max_seq_length,
-        dtype=None,
-        load_in_4bit=False,
+    errors: list[str] = []
+    for mode, model_class in (
+        ("FastVisionModel", FastVisionModel),
+        ("FastLanguageModel", FastLanguageModel),
+    ):
+        try:
+            model, tokenizer = model_class.from_pretrained(
+                model_name=path_or_repo,
+                max_seq_length=max_seq_length,
+                dtype=None,
+                load_in_4bit=False,
+            )
+            return model, tokenizer, mode
+        except Exception as exc:
+            errors.append(f"{mode}: {type(exc).__name__}: {exc}")
+
+    joined = "\n".join(errors)
+    raise RuntimeError(
+        "Failed to load model with both vision and language backends.\n"
+        f"model={path_or_repo}\n"
+        f"hint={model_hint}\n"
+        f"errors:\n{joined}"
     )
-    return model, tokenizer, mode
 
 
 def compute_ppl(model, dataset, batch_size: int = 4, max_batches: int | None = None) -> dict[str, Any]:
@@ -78,9 +84,26 @@ def compute_ppl(model, dataset, batch_size: int = 4, max_batches: int | None = N
     with torch.no_grad():
         for start in tqdm(range(0, n, batch_size), desc="ppl"):
             batch = dataset[start : min(start + batch_size, n)]
-            input_ids = torch.tensor(batch["input_ids"], dtype=torch.long, device=device)
-            labels = torch.tensor(batch["labels"], dtype=torch.long, device=device)
-            loss = model(input_ids=input_ids, labels=labels).loss
+            ids_list = [list(ids) for ids in batch["input_ids"]]
+            lbl_list = [list(lbl) for lbl in batch["labels"]]
+
+            max_len = max(
+                max(len(ids) for ids in ids_list),
+                max(len(lbl) for lbl in lbl_list),
+            )
+            pad_token_id = getattr(getattr(model, "config", None), "pad_token_id", None)
+            if pad_token_id is None:
+                pad_token_id = 0
+
+            pad_ids = [ids + [pad_token_id] * (max_len - len(ids)) for ids in ids_list]
+            pad_lbl = [lbl + [-100] * (max_len - len(lbl)) for lbl in lbl_list]
+            attn = [[1] * len(ids) + [0] * (max_len - len(ids)) for ids in ids_list]
+
+            input_ids = torch.tensor(pad_ids, dtype=torch.long, device=device)
+            labels = torch.tensor(pad_lbl, dtype=torch.long, device=device)
+            attention_mask = torch.tensor(attn, dtype=torch.long, device=device)
+
+            loss = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels).loss
             tokens = (labels != -100).sum().item()
             total_loss += float(loss.item()) * tokens
             total_tokens += tokens
