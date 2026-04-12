@@ -63,9 +63,16 @@ def maybe_upload_eval_artifacts(
         return
 
     model_eval_dir = eval_root / "lm_eval" / upload_folder.name
+    base_only_eval_dir = eval_root / "lm_eval" / "base_only"
     summary_path = eval_root / "summary.json"
+    base_only_summary_path = eval_root / "eval_results_base_only.json"
 
-    if not model_eval_dir.exists() and not summary_path.exists():
+    if (
+        not model_eval_dir.exists()
+        and not base_only_eval_dir.exists()
+        and not summary_path.exists()
+        and not base_only_summary_path.exists()
+    ):
         print(f"[INFO] No eval artifacts for '{upload_folder.name}'. Skipping eval upload.")
         return
 
@@ -77,8 +84,20 @@ def maybe_upload_eval_artifacts(
         if summary_path.exists():
             shutil.copy2(summary_path, target_eval_root / "summary.json")
 
+        if base_only_summary_path.exists():
+            shutil.copy2(base_only_summary_path, target_eval_root / "eval_results_base_only.json")
+
         if model_eval_dir.exists():
             shutil.copytree(model_eval_dir, target_eval_root / upload_folder.name, dirs_exist_ok=True)
+
+        if base_only_eval_dir.exists():
+            target_lm_eval_root = target_eval_root / "lm_eval"
+            target_lm_eval_root.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(
+                base_only_eval_dir,
+                target_lm_eval_root / "base_only",
+                dirs_exist_ok=True,
+            )
 
         api.upload_folder(
             repo_id=repo_id,
