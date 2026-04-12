@@ -1,0 +1,42 @@
+train_datasets:
+  - path: "alwaysgood/wmt24pp-kr"
+    name: null
+    split: "train"
+    streaming: false
+    prefer_local_snapshot: true
+    trust_remote_code: false
+    max_rows: null
+
+  - path: "alwaysgood/flores-kr"
+    name: null
+    split: "train"
+    streaming: false
+    prefer_local_snapshot: true
+    trust_remote_code: false
+    max_rows: null
+
+validation_datasets:
+  - path: "alwaysgood/wmt24pp-kr"
+    name: null
+    split: "validation"
+    streaming: false
+    prefer_local_snapshot: true
+    trust_remote_code: false
+    max_rows: null
+
+  - path: "alwaysgood/flores-kr"
+    name: null
+    split: "validation"
+    streaming: false
+    prefer_local_snapshot: true
+    trust_remote_code: false
+    max_rows: null
+
+text_fields:
+  - "content"
+  - "text"
+  - "source_text"
+  - "target_text"
+
+id_column: "id"
+source_column: "dataset"

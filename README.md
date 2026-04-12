@@ -1,4 +1,4 @@
-# scp_stage1_cpt
+# scp_stage2_pd
 
 Independent CPT pipeline using Hydra + Unsloth + W&B.
 
@@ -15,8 +15,8 @@ Independent CPT pipeline using Hydra + Unsloth + W&B.
 ```bash
 # Docker image: unsloth/unsloth:latest
 
-git clone https://github.com/contiloop/scp_stage1_cpt.git
-cd scp_stage1_cpt
+git clone https://github.com/contiloop/scp_stage2_pd.git
+cd scp_stage2_pd
 make set                   # includes causal_conv1d kernel check (rebuilds only if needed)
 python -c "from huggingface_hub import login; login(token='hf_xxxxxxx')"
 wandb login                # optional
@@ -30,7 +30,7 @@ make train config=full
 ## Quick Start (Local)
 
 ```bash
-cd scp_stage1_cpt
+cd scp_stage2_pd
 make set
 make preprocess
 make train config=full
@@ -76,7 +76,10 @@ Train-time eval batch still uses `training.per_device_eval_batch_size`.
 
 ## Key Defaults
 
-- Dataset source: `alwaysgood/korean-financial-cpt` + `alwaysgood/korean_rlhf_content_filtered`
+- Dataset source: `alwaysgood/wmt24pp-kr` + `alwaysgood/flores-kr`
+- Parallel dataset preset: `alwaysgood/wmt24pp-kr` + `alwaysgood/flores-kr` (`data=parallel_wmt24pp_flores`)
+- If `data.validation_datasets` is set, preprocessing uses those official validation splits directly.
+  If not set, preprocessing falls back to random split (`preprocessing.split.val_ratio`).
 - Backend: Unsloth (`FastLanguageModel` / `FastVisionModel`)
 - Logging: W&B
 - Input embeddings are frozen by default (`training.freeze_embeddings=true`)
@@ -96,48 +99,38 @@ make train config=full
 # GPU memory presets (full-weight)
 make train config=full_48gb
 make train config=full_80gb
-make train config=full_96gb
-
-# GPU-specific training-time eval OOM probe presets
-make train config=full_eval_oom_probe_48gb
-make train config=full_eval_oom_probe_80gb
-make train config=full_eval_oom_probe_96gb
-
-# LoRA (configs/lora.yaml)
-make train config=lora
+make train config=full_96gb_qwen3.5_4b
 
 # switch model profile (example: Gemma 4 E2B)
-make train config=full_96gb ovr="model=gemma_4_e2b"
+make train config=full_96gb_qwen3.5_4b ovr="model=gemma_4_e2b"
 
 # full flow on a new instance for Gemma 4 E2B
 make set
 make preprocess ovr="model=gemma_4_e2b"
-make train config=full_96gb ovr="model=gemma_4_e2b"
+make train config=full_96gb_qwen3.5_4b ovr="model=gemma_4_e2b"
 
-# multi-source preprocessing (financial + RLHF content)
-make preprocess config=full_96gb ovr="data=korean_financial_plus_rlhf"
+# parallel data preprocessing/training (official validation splits from each source)
+make preprocess config=full_96gb_qwen3.5_4b
+make train config=full_96gb_qwen3.5_4b
 
 # resume from last checkpoint
 make train-resume config=full
 
 # upload final output dir (default CKPT=final, eval artifacts included when matched)
-make push-to-hub config=full_96gb HF_REPO=your-name/your-model
+make push-to-hub config=full_96gb_qwen3.5_4b HF_REPO=your-name/your-model
 
 # upload specific checkpoint (recommended)
-make push-to-hub config=full_96gb HF_REPO=your-name/your-model CKPT=checkpoint-3500
+make push-to-hub config=full_96gb_qwen3.5_4b HF_REPO=your-name/your-model CKPT=checkpoint-3500
 
 # model-only upload (skip eval artifacts)
-python -m src.push_to_hub --config-path configs --config-name full_96gb --repo your-name/your-model --checkpoint checkpoint-3500 --no-include-eval
+python -m src.push_to_hub --config-path configs --config-name full_96gb_qwen3.5_4b --repo your-name/your-model --checkpoint checkpoint-3500 --no-include-eval
 ```
 
 GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):
 
 - `full_48gb`: train batch `2`, grad accum `16`, train-eval batch `2`, offline eval batch `4`
 - `full_80gb`: train batch `4`, grad accum `8`, train-eval batch `4`, offline eval batch `8`
-- `full_96gb`: train batch `8`, grad accum `4`, train-eval batch `8`, offline eval batch `12`
-- `full_eval_oom_probe_48gb`: `gpu48` + `training.{max_steps=100, eval_steps=1, save_steps=10}`
-- `full_eval_oom_probe_80gb`: `gpu80` + `training.{max_steps=100, eval_steps=1, save_steps=10}`
-- `full_eval_oom_probe_96gb`: `gpu96` + `training.{max_steps=100, eval_steps=1, save_steps=10}`
+- `full_96gb_qwen3.5_4b`: train batch `8`, grad accum `4`, train-eval batch `8`, offline eval batch `12`
 
 Create a new file under `configs/` when you need a new experiment setup, then run:
 

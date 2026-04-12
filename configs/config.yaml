@@ -1,5 +1,5 @@
 defaults:
-  - data: korean_financial_plus_rlhf
+  - data: parallel_wmt24pp_flores
   - model: qwen3_5_4b_base
   - finetune: full
   - preprocessing: default
@@ -11,9 +11,9 @@ defaults:
 seed: 42
 
 experiment:
-  name: "korean-financial-cpt-full-96gb"
-  output_root: "artifacts/cpt_full_96gb"
-  processed_dir: "data/processed/cpt_korean_financial"
+  name: "parallel-cpt-full-96gb"
+  output_root: "artifacts/cpt_parallel_full_96gb"
+  processed_dir: "data/processed/cpt_parallel"
 
 hydra:
   run:

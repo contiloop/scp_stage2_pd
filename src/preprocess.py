@@ -38,6 +38,20 @@ def resolve_dataset_cfgs(cfg: DictConfig) -> list[DictConfig]:
     raise RuntimeError("Config must include either data.dataset or data.datasets.")
 
 
+def resolve_train_dataset_cfgs(cfg: DictConfig) -> list[DictConfig]:
+    train_datasets = cfg.data.get("train_datasets")
+    if train_datasets is not None:
+        return [dataset_cfg for dataset_cfg in train_datasets]
+    return resolve_dataset_cfgs(cfg)
+
+
+def resolve_validation_dataset_cfgs(cfg: DictConfig) -> list[DictConfig]:
+    validation_datasets = cfg.data.get("validation_datasets")
+    if validation_datasets is not None:
+        return [dataset_cfg for dataset_cfg in validation_datasets]
+    return []
+
+
 def resolve_local_dataset_snapshot(repo_id: str) -> Path | None:
     """
     Return latest local HF dataset snapshot path if available.
@@ -211,7 +225,11 @@ def iter_dataset_rows(dataset_cfg: DictConfig):
         yield idx, dataset[idx]
 
 
-def build_unpacked_records(cfg: DictConfig, tokenizer) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def build_unpacked_records(
+    cfg: DictConfig,
+    tokenizer,
+    dataset_cfgs: list[DictConfig] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     eos_id = tokenizer.eos_token_id
     if eos_id is None:
         raise RuntimeError("Tokenizer has no eos_token_id")
@@ -232,7 +250,8 @@ def build_unpacked_records(cfg: DictConfig, tokenizer) -> tuple[list[dict[str, A
     skipped_short = 0
     chunk_count = 0
 
-    dataset_cfgs = resolve_dataset_cfgs(cfg)
+    if dataset_cfgs is None:
+        dataset_cfgs = resolve_train_dataset_cfgs(cfg)
     for dataset_idx, dataset_cfg in enumerate(dataset_cfgs):
         text_fields = dataset_cfg.get("text_fields")
         if text_fields is None:
@@ -307,6 +326,39 @@ def build_unpacked_records(cfg: DictConfig, tokenizer) -> tuple[list[dict[str, A
     return records, stats
 
 
+def build_records_with_snapshot_fallback(
+    cfg: DictConfig,
+    tokenizer,
+    dataset_cfgs: list[DictConfig],
+    split_name: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    records, stats = build_unpacked_records(
+        cfg=cfg,
+        tokenizer=tokenizer,
+        dataset_cfgs=dataset_cfgs,
+    )
+    if records:
+        return records, stats
+
+    if not any(bool(ds.get("prefer_local_snapshot", True)) for ds in dataset_cfgs):
+        return records, stats
+
+    print(
+        f"[WARN] No records built from local snapshot path for {split_name}. "
+        "Retrying with HF Hub streaming."
+    )
+    with open_dict(cfg):
+        for dataset_cfg in dataset_cfgs:
+            dataset_cfg.prefer_local_snapshot = False
+            dataset_cfg.streaming = True
+
+    return build_unpacked_records(
+        cfg=cfg,
+        tokenizer=tokenizer,
+        dataset_cfgs=dataset_cfgs,
+    )
+
+
 def maybe_pack_dataset(unpacked_ds: Dataset, cfg: DictConfig) -> Dataset:
     if not bool(cfg.preprocessing.packing.enabled):
         return unpacked_ds
@@ -367,35 +419,49 @@ def main(cfg: DictConfig) -> None:
     if tokenizer.eos_token_id is None:
         raise RuntimeError(f"Tokenizer '{tokenizer_name}' has no eos token id")
 
-    dataset_cfgs = resolve_dataset_cfgs(cfg)
-    unpacked_records, stats = build_unpacked_records(cfg, tokenizer=tokenizer)
-    if not unpacked_records and any(bool(ds.get("prefer_local_snapshot", True)) for ds in dataset_cfgs):
-        print(
-            "[WARN] No records built from local snapshot path. "
-            "Retrying with HF Hub streaming."
-        )
-        with open_dict(cfg):
-            if cfg.data.get("datasets") is not None:
-                for dataset_cfg in cfg.data.datasets:
-                    dataset_cfg.prefer_local_snapshot = False
-                    dataset_cfg.streaming = True
-            else:
-                cfg.data.dataset.prefer_local_snapshot = False
-                cfg.data.dataset.streaming = True
-        unpacked_records, stats = build_unpacked_records(cfg, tokenizer=tokenizer)
+    train_dataset_cfgs = resolve_train_dataset_cfgs(cfg)
+    val_dataset_cfgs = resolve_validation_dataset_cfgs(cfg)
 
-    if not unpacked_records:
+    train_records, train_stats = build_records_with_snapshot_fallback(
+        cfg=cfg,
+        tokenizer=tokenizer,
+        dataset_cfgs=train_dataset_cfgs,
+        split_name="train",
+    )
+    if not train_records:
         raise RuntimeError(
-            "No records built from dataset. "
-            f"docs_kept={stats.get('docs_kept', 0)}, "
-            f"rows_skipped_empty={stats.get('rows_skipped_empty', 0)}, "
-            f"rows_skipped_short={stats.get('rows_skipped_short', 0)}. "
+            "No train records built from dataset. "
+            f"docs_kept={train_stats.get('docs_kept', 0)}, "
+            f"rows_skipped_empty={train_stats.get('rows_skipped_empty', 0)}, "
+            f"rows_skipped_short={train_stats.get('rows_skipped_short', 0)}. "
             "Check data.text_fields and filtering settings."
         )
 
-    unpacked_ds = Dataset.from_list(unpacked_records)
-    final_ds = maybe_pack_dataset(unpacked_ds, cfg)
-    train_ds, val_ds = split_dataset(final_ds, cfg)
+    unpacked_train_ds = Dataset.from_list(train_records)
+    train_ds = maybe_pack_dataset(unpacked_train_ds, cfg)
+
+    unpacked_val_ds: Dataset | None = None
+    val_ds: Dataset | None = None
+    val_stats: dict[str, Any] | None = None
+
+    if val_dataset_cfgs:
+        val_records, val_stats = build_records_with_snapshot_fallback(
+            cfg=cfg,
+            tokenizer=tokenizer,
+            dataset_cfgs=val_dataset_cfgs,
+            split_name="validation",
+        )
+        if not val_records:
+            raise RuntimeError(
+                "validation_datasets are configured but no validation records were built. "
+                f"docs_kept={val_stats.get('docs_kept', 0) if val_stats else 0}, "
+                f"rows_skipped_empty={val_stats.get('rows_skipped_empty', 0) if val_stats else 0}, "
+                f"rows_skipped_short={val_stats.get('rows_skipped_short', 0) if val_stats else 0}."
+            )
+        unpacked_val_ds = Dataset.from_list(val_records)
+        val_ds = maybe_pack_dataset(unpacked_val_ds, cfg)
+    else:
+        train_ds, val_ds = split_dataset(train_ds, cfg)
 
     output_dir = resolve_workspace_path(cfg.preprocessing.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -411,12 +477,15 @@ def main(cfg: DictConfig) -> None:
     if val_ds is not None:
         prepare_save_path(val_dir, overwrite=overwrite)
         val_ds.save_to_disk(str(val_dir))
+    elif overwrite and val_dir.exists():
+        shutil.rmtree(val_dir)
 
-    source_paths = [str(dataset_cfg.path) for dataset_cfg in dataset_cfgs]
-    source_splits = [str(dataset_cfg.split) for dataset_cfg in dataset_cfgs]
+    train_source_paths = [str(dataset_cfg.path) for dataset_cfg in train_dataset_cfgs]
+    train_source_splits = [str(dataset_cfg.split) for dataset_cfg in train_dataset_cfgs]
     metadata = {
-        "source": source_paths[0] if len(source_paths) == 1 else source_paths,
-        "split": source_splits[0] if len(source_splits) == 1 else source_splits,
+        "source": train_source_paths[0] if len(train_source_paths) == 1 else train_source_paths,
+        "split": train_source_splits[0] if len(train_source_splits) == 1 else train_source_splits,
+        "validation_mode": "explicit_datasets" if val_dataset_cfgs else "random_split",
         "text_fields": [str(x) for x in cfg.data.text_fields],
         "packing": {
             "enabled": bool(cfg.preprocessing.packing.enabled),
@@ -424,21 +493,41 @@ def main(cfg: DictConfig) -> None:
             "max_length": int(cfg.preprocessing.packing.max_length),
         },
         "stats": {
-            **stats,
-            "unpacked_rows": len(unpacked_ds),
-            "final_rows": len(final_ds),
+            "train_docs_kept": train_stats["docs_kept"],
+            "train_chunks_total": train_stats["chunks_total"],
+            "train_rows_skipped_empty": train_stats["rows_skipped_empty"],
+            "train_rows_skipped_short": train_stats["rows_skipped_short"],
+            "train_records_total": train_stats["records_total"],
+            "unpacked_train_rows": len(unpacked_train_ds),
             "train_rows": len(train_ds),
+            "unpacked_val_rows": len(unpacked_val_ds) if unpacked_val_ds is not None else 0,
             "val_rows": len(val_ds) if val_ds is not None else 0,
         },
         "config": OmegaConf.to_container(cfg, resolve=True),
     }
+    if val_dataset_cfgs:
+        val_source_paths = [str(dataset_cfg.path) for dataset_cfg in val_dataset_cfgs]
+        val_source_splits = [str(dataset_cfg.split) for dataset_cfg in val_dataset_cfgs]
+        metadata["validation_source"] = (
+            val_source_paths[0] if len(val_source_paths) == 1 else val_source_paths
+        )
+        metadata["validation_split"] = (
+            val_source_splits[0] if len(val_source_splits) == 1 else val_source_splits
+        )
+    if val_stats is not None:
+        metadata["stats"]["validation_docs_kept"] = val_stats["docs_kept"]
+        metadata["stats"]["validation_chunks_total"] = val_stats["chunks_total"]
+        metadata["stats"]["validation_rows_skipped_empty"] = val_stats["rows_skipped_empty"]
+        metadata["stats"]["validation_rows_skipped_short"] = val_stats["rows_skipped_short"]
+        metadata["stats"]["validation_records_total"] = val_stats["records_total"]
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print("=" * 80)
     print("Preprocess Complete")
     print("=" * 80)
-    print(f"unpacked rows: {len(unpacked_ds):,}")
-    print(f"final rows   : {len(final_ds):,}")
+    print(f"unpacked train rows: {len(unpacked_train_ds):,}")
+    if unpacked_val_ds is not None:
+        print(f"unpacked val rows  : {len(unpacked_val_ds):,}")
     print(f"train rows   : {len(train_ds):,}")
     print(f"val rows     : {len(val_ds):,}" if val_ds is not None else "val rows     : 0")
     print(f"saved to     : {output_dir}")

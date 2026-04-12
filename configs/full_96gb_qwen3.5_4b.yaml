@@ -1,19 +1,19 @@
 defaults:
-  - data: korean_financial_plus_rlhf
+  - data: parallel_wmt24pp_flores
   - model: qwen3_5_4b_base
-  - finetune: lora
+  - finetune: full
   - preprocessing: default
-  - training: default
-  - evaluation: default
+  - training: gpu96
+  - evaluation: gpu96
   - logging: wandb
   - _self_
 
 seed: 42
 
 experiment:
-  name: "korean-financial-cpt-lora"
-  output_root: "artifacts/cpt_lora"
-  processed_dir: "data/processed/cpt_korean_financial"
+  name: "parallel-cpt-full-96gb"
+  output_root: "artifacts/cpt_parallel_full_96gb"
+  processed_dir: "data/processed/cpt_parallel"
 
 hydra:
   run:
@@ -21,3 +21,4 @@ hydra:
   sweep:
     dir: ${experiment.output_root}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
     subdir: ${hydra.job.num}
+

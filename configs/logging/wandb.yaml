@@ -4,9 +4,9 @@ report_to:
 run_name: null
 
 wandb:
-  project: "mono-cpt"
+  project: "parallel-cpt"
   entity: null
   tags:
     - "cpt"
-    - "korean-financial"
+    - "parallel"
   notes: ""
