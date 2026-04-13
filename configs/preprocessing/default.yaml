@@ -2,7 +2,7 @@ output_dir: ${experiment.processed_dir}
 overwrite_output: false
 
 cleaning:
-  min_chars: 20
+  min_chars: 0
 
 chunking:
   paragraph_separator: "\n\n"
