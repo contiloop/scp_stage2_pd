@@ -140,6 +140,59 @@ make train config=<cfg>
 make eval eval_config=<cfg>
 ```
 
+## Full Stage2 Runbook
+
+```bash
+# common init
+git clone https://github.com/contiloop/scp_stage2_pd.git
+cd scp_stage2_pd
+make set SKIP_CAUSAL_CONV1D=1
+python -c "from huggingface_hub import login; login(token='<HF_TOKEN>')"
+wandb login  # optional
+
+# 1) Qwen3 family
+make preprocess config=full_96gb_unsloth_qwen3_4b_base
+make train config=full_96gb_unsloth_qwen3_4b_base
+make eval eval_config=full_96gb_unsloth_qwen3_4b_base
+make push-to-hub config=full_96gb_unsloth_qwen3_4b_base HF_REPO=alwaysgood/QWEN3-4B-Base-stage2 CKPT=final
+
+make train config=full_96gb_alwaysgood_qwen3_4b_cpt
+make eval eval_config=full_96gb_alwaysgood_qwen3_4b_cpt
+make push-to-hub config=full_96gb_alwaysgood_qwen3_4b_cpt HF_REPO=alwaysgood/QWEN3-4B-CPT-stage2 CKPT=final
+
+rm -rf artifacts/cpt_parallel_full_96gb_unsloth_qwen3_4b_base
+rm -rf artifacts/cpt_parallel_full_96gb_alwaysgood_qwen3_4b_cpt
+rm -rf data/processed/cpt_parallel
+
+# 2) Qwen3.5 family
+make preprocess config=full_96gb_unsloth_qwen3_5_4b_base
+make train config=full_96gb_unsloth_qwen3_5_4b_base
+make eval eval_config=full_96gb_unsloth_qwen3_5_4b_base
+make push-to-hub config=full_96gb_unsloth_qwen3_5_4b_base HF_REPO=alwaysgood/QWEN3.5-4B-Base-stage2 CKPT=final
+
+make train config=full_96gb_alwaysgood_qwen3_5_4b_cpt_half_lr
+make eval eval_config=full_96gb_alwaysgood_qwen3_5_4b_cpt_half_lr
+make push-to-hub config=full_96gb_alwaysgood_qwen3_5_4b_cpt_half_lr HF_REPO=alwaysgood/QWEN3.5-4B-CPT-half-lr-stage2 CKPT=final
+
+rm -rf artifacts/cpt_parallel_full_96gb_unsloth_qwen3_5_4b_base
+rm -rf artifacts/cpt_parallel_full_96gb_alwaysgood_qwen3_5_4b_cpt_half_lr
+rm -rf data/processed/cpt_parallel
+
+# 3) Gemma family
+make preprocess config=full_96gb_unsloth_gemma_4_e2b
+make train config=full_96gb_unsloth_gemma_4_e2b
+make eval eval_config=full_96gb_unsloth_gemma_4_e2b
+make push-to-hub config=full_96gb_unsloth_gemma_4_e2b HF_REPO=alwaysgood/gemma-4-E2B-stage2 CKPT=final
+
+make train config=full_96gb_alwaysgood_gemma4_cpt
+make eval eval_config=full_96gb_alwaysgood_gemma4_cpt
+make push-to-hub config=full_96gb_alwaysgood_gemma4_cpt HF_REPO=alwaysgood/gemma4-CPT-stage2 CKPT=final
+
+rm -rf artifacts/cpt_parallel_full_96gb_unsloth_gemma_4_e2b
+rm -rf artifacts/cpt_parallel_full_96gb_alwaysgood_gemma4_cpt
+rm -rf data/processed/cpt_parallel
+```
+
 GPU preset summary (Qwen/Gemma 4B, seq_len=1024 baseline):
 
 - `full_48gb`: train batch `2`, grad accum `16`, train-eval batch `2`, offline eval batch `4`
