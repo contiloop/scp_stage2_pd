@@ -24,7 +24,7 @@ make preprocess
 
 # keep training alive after SSH disconnect
 tmux new -s train
-make train config=full
+make train config=full_96gb_qwen3.5_4b
 ```
 
 ## Quick Start (Local)
@@ -33,8 +33,8 @@ make train config=full
 cd scp_stage2_pd
 make set
 make preprocess
-make train config=full
-make eval
+make train config=full_96gb_qwen3.5_4b
+make eval eval_config=full_96gb_qwen3.5_4b
 ```
 
 For Gemma-only workflows (no `causal_conv1d` dependency), you can skip that setup:
@@ -83,8 +83,9 @@ Train-time eval batch still uses `training.per_device_eval_batch_size`.
 - Backend: Unsloth (`FastLanguageModel` / `FastVisionModel`)
 - Logging: W&B
 - Input embeddings are frozen by default (`training.freeze_embeddings=true`)
-- Runtime packing (train-time): `training.runtime_packing.enabled=true` (`bfd_split`, `padding_free=true`)
+- Runtime packing (train-time): `training.runtime_packing.enabled=false`
 - Preprocessing packing: `preprocessing.packing.enabled=false` (store unpacked records)
+- Sequence length default: `model.max_seq_length=1024`
 - Checkpoint policy: `save_strategy=steps`, `save_steps=200`, `save_total_limit=1`
 
 ## Config Usage
@@ -101,17 +102,10 @@ make train config=full_48gb
 make train config=full_80gb
 make train config=full_96gb_qwen3.5_4b
 
-# switch model profile (example: Gemma 4 E2B)
-make train config=full_96gb_qwen3.5_4b ovr="model=gemma_4_e2b"
-
-# full flow on a new instance for Gemma 4 E2B
-make set
-make preprocess ovr="model=gemma_4_e2b"
-make train config=full_96gb_qwen3.5_4b ovr="model=gemma_4_e2b"
-
 # parallel data preprocessing/training (official validation splits from each source)
 make preprocess config=full_96gb_qwen3.5_4b
 make train config=full_96gb_qwen3.5_4b
+make eval eval_config=full_96gb_qwen3.5_4b
 
 # resume from last checkpoint
 make train-resume config=full
@@ -126,7 +120,23 @@ make push-to-hub config=full_96gb_qwen3.5_4b HF_REPO=your-name/your-model CKPT=c
 python -m src.push_to_hub --config-path configs --config-name full_96gb_qwen3.5_4b --repo your-name/your-model --checkpoint checkpoint-3500 --no-include-eval
 ```
 
-GPU preset summary (Qwen/Gemma 4B, seq_len=4096 baseline):
+## 96GB Model Presets
+
+- `full_96gb_alwaysgood_gemma4_cpt` -> `alwaysgood/gemma4-CPT`
+- `full_96gb_alwaysgood_qwen3_5_4b_cpt_half_lr` -> `alwaysgood/QWEN3.5-4B-CPT-half-lr`
+- `full_96gb_alwaysgood_qwen3_4b_cpt` -> `alwaysgood/QWEN3-4B-CPT`
+- `full_96gb_unsloth_qwen3_4b_base` -> `unsloth/Qwen3-4B-Base`
+- `full_96gb_unsloth_qwen3_5_4b_base` -> `unsloth/Qwen3.5-4B-Base`
+- `full_96gb_unsloth_gemma_4_e2b` -> `unsloth/gemma-4-E2B`
+
+```bash
+# one-line pattern (replace <cfg> with one of the six presets above)
+make preprocess config=<cfg>
+make train config=<cfg>
+make eval eval_config=<cfg>
+```
+
+GPU preset summary (Qwen/Gemma 4B, seq_len=1024 baseline):
 
 - `full_48gb`: train batch `2`, grad accum `16`, train-eval batch `2`, offline eval batch `4`
 - `full_80gb`: train batch `4`, grad accum `8`, train-eval batch `4`, offline eval batch `8`

@@ -2,7 +2,7 @@
 
 PYTHON ?= python3
 config ?= config
-eval_config ?= full_96gb
+eval_config ?= full_96gb_qwen3.5_4b
 limit ?= 400
 ovr ?=
 HF_REPO ?=
