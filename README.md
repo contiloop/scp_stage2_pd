@@ -18,6 +18,8 @@ Independent CPT pipeline using Hydra + Unsloth + W&B.
 git clone https://github.com/contiloop/scp_stage2_pd.git
 cd scp_stage2_pd
 make set                   # includes causal_conv1d kernel check (rebuilds only if needed)
+# skip causal_conv1d setup/check
+# make set SKIP_CAUSAL_CONV1D=1
 python -c "from huggingface_hub import login; login(token='hf_xxxxxxx')"
 wandb login                # optional
 make preprocess
@@ -32,6 +34,8 @@ make train config=full_96gb_qwen3.5_4b
 ```bash
 cd scp_stage2_pd
 make set
+# or skip causal_conv1d setup/check
+# make set SKIP_CAUSAL_CONV1D=1
 make preprocess
 make train config=full_96gb_qwen3.5_4b
 make eval eval_config=full_96gb_qwen3.5_4b
