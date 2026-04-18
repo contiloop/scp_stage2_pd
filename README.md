@@ -52,7 +52,7 @@ make set SKIP_CAUSAL_CONV1D=1
 - `make preprocess`: downloads/loads raw dataset and writes processed train/val dataset
 - `make set`: installs dependencies, checks `causal_conv1d` CUDA kernel runtime, and only rebuilds when needed (Blackwell uses source build fallback)
   - skip `causal_conv1d` setup/verification via `make set SKIP_CAUSAL_CONV1D=1`
-  - installs `transformers>=5.4.0` (required for `unsloth/gemma-4-E2B`)
+  - installs `transformers==5.5.4` (pinned for stable Gemma 4 shared-KV behavior)
 - `make train`: runs CPT training from config (`config=...` selects config file)
 - `make train-resume`: resumes from latest checkpoint (`training.resume_from_checkpoint=auto`)
 - `make eval`: runs validation PPL for base + CPT model, then lm-eval on CPT model

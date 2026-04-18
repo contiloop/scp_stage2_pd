@@ -35,8 +35,6 @@ validation_datasets:
 text_fields:
   - "content"
   - "text"
-  - "source_text"
-  - "target_text"
 
 id_column: "id"
 source_column: "dataset"
