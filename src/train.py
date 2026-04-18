@@ -39,6 +39,7 @@ class CausalPackedCollator:
         max_len = max(len(f["input_ids"]) for f in features)
         input_batch = []
         label_batch = []
+        attention_batch = []
 
         for feature in features:
             input_ids = list(feature["input_ids"])
@@ -47,10 +48,12 @@ class CausalPackedCollator:
 
             input_batch.append(input_ids + [self.pad_token_id] * pad_len)
             label_batch.append(labels + [-100] * pad_len)
+            # Build mask from true sequence length, not token id value.
+            attention_batch.append([1] * len(input_ids) + [0] * pad_len)
 
         input_tensor = torch.tensor(input_batch, dtype=torch.long)
         label_tensor = torch.tensor(label_batch, dtype=torch.long)
-        attention_mask = (input_tensor != self.pad_token_id).long()
+        attention_mask = torch.tensor(attention_batch, dtype=torch.long)
 
         return {
             "input_ids": input_tensor,
