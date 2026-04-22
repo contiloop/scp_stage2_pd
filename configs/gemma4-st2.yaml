@@ -1,0 +1,27 @@
+defaults:
+  - data: parallel_wmt24pp_flores
+  - model: alwaysgood_gemma4_st1
+  - finetune: full
+  - preprocessing: default
+  - training: gpu96
+  - evaluation: gpu96
+  - logging: wandb
+  - _self_
+
+seed: 42
+
+experiment:
+  name: "parallel-cpt-gemma4-st2"
+  output_root: "artifacts/cpt_parallel_gemma4_st2"
+  processed_dir: "data/processed/cpt_parallel_gemma4_st2"
+
+training:
+  freeze_embeddings: false
+  max_grad_norm: 1.0
+
+hydra:
+  run:
+    dir: ${experiment.output_root}/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${experiment.output_root}/multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
